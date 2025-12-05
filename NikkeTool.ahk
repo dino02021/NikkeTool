@@ -72,7 +72,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.01"
+global AppVersion := "v1.02"
 
 ; ============================================================
 ; 初始化
