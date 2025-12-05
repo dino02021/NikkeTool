@@ -22,6 +22,8 @@ global LClick1_HoldMs := 225
 global LClick1_GapMs := 25
 global LClick2_HoldMs := 240
 global LClick2_GapMs := 40
+global LClick3_HoldMs := 240
+global LClick3_GapMs := 40
 global KeySpamDelayMs  := 17
 
 ; 預設綁定鍵
@@ -31,6 +33,7 @@ global KeySpamA      := "F15"
 global KeyEscDouble  := "F16"
 global KeyLClick1 := "F17"
 global KeyLClick2 := "F18"
+global KeyLClick3 := "F19"
 
 ; 功能啟用
 global IsSpamDEnabled      := false
@@ -39,6 +42,7 @@ global IsSpamAEnabled      := false
 global IsEscDoubleEnabled  := false
 global IsLClick1Enabled := true
 global IsLClick2Enabled := true
+global IsLClick3Enabled := false
 
 ; 自動啟動
 global AutoStartEnabled := false
@@ -53,14 +57,14 @@ global HotkeyBaseKeyMap := Map()
 
 ; GUI 控制項
 global MainGui
-global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyLClick1, EditKeyLClick2
-global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkLClick1, ChkLClick2
-global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap
-global LblEscDelay, LblLClick1Hold, LblLClick1Gap, LblLClick2Hold, LblLClick2Gap
+global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyLClick1, EditKeyLClick2, EditKeyLClick3
+global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkLClick1, ChkLClick2, ChkLClick3
+global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap, EditLClick3Hold, EditLClick3Gap
+global LblEscDelay, LblLClick1Hold, LblLClick1Gap, LblLClick2Hold, LblLClick2Gap, LblLClick3Hold, LblLClick3Gap
 global TxtStatus, ChkAutoStart, TxtNikkeStatus
 global DelayCtrlMap := Map()
-global TxtLClick1Info, TxtLClick2Info, TxtLClick1Warn, TxtLClick2Warn
-global LClick1WarnPosX, LClick1WarnPosY, LClick2WarnPosX, LClick2WarnPosY, WarnOffsetXPx
+global TxtLClick1Info, TxtLClick2Info, TxtLClick3Info, TxtLClick1Warn, TxtLClick2Warn, TxtLClick3Warn
+global LClick1WarnPosX, LClick1WarnPosY, LClick2WarnPosX, LClick2WarnPosY, LClick3WarnPosX, LClick3WarnPosY, WarnOffsetXPx
 
 ; 綁定狀態
 global IsBinding := false
@@ -184,9 +188,9 @@ WaitMsCancel(ms, cancelKey) => BusyWaitMsCancel(ms, cancelKey)
 ; ============================================================
 LoadSettings() {
     global SettingsFile, AutoStartLink
-    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled
+    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs, LClick3_HoldMs, LClick3_GapMs
+    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2, KeyLClick3
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled, IsLClick3Enabled
     global AutoStartEnabled
 
     if !FileExist(SettingsFile)
@@ -197,6 +201,8 @@ LoadSettings() {
     try LClick1_GapMs := Integer(IniRead(SettingsFile, "Delays", "LClick1_GapMs", LClick1_GapMs))
     try LClick2_HoldMs := Integer(IniRead(SettingsFile, "Delays", "LClick2_HoldMs", LClick2_HoldMs))
     try LClick2_GapMs := Integer(IniRead(SettingsFile, "Delays", "LClick2_GapMs", LClick2_GapMs))
+    try LClick3_HoldMs := Integer(IniRead(SettingsFile, "Delays", "LClick3_HoldMs", LClick3_HoldMs))
+    try LClick3_GapMs := Integer(IniRead(SettingsFile, "Delays", "LClick3_GapMs", LClick3_GapMs))
 
     try KeySpamD      := IniRead(SettingsFile, "Keys", "DSpam",      KeySpamD)
     try KeySpamS      := IniRead(SettingsFile, "Keys", "SSpam",      KeySpamS)
@@ -204,6 +210,7 @@ LoadSettings() {
     try KeyEscDouble  := IniRead(SettingsFile, "Keys", "EscDouble",  KeyEscDouble)
     try KeyLClick1 := IniRead(SettingsFile, "Keys", "LClickSeq1", KeyLClick1)
     try KeyLClick2 := IniRead(SettingsFile, "Keys", "LClickSeq2", KeyLClick2)
+    try KeyLClick3 := IniRead(SettingsFile, "Keys", "LClickSeq3", KeyLClick3)
 
     try IsSpamDEnabled      := (Integer(IniRead(SettingsFile, "Enable", "DSpam",      IsSpamDEnabled      ? 1 : 0)) != 0)
     try IsSpamSEnabled      := (Integer(IniRead(SettingsFile, "Enable", "SSpam",      IsSpamSEnabled      ? 1 : 0)) != 0)
@@ -211,22 +218,25 @@ LoadSettings() {
     try IsEscDoubleEnabled  := (Integer(IniRead(SettingsFile, "Enable", "EscDouble",  IsEscDoubleEnabled  ? 1 : 0)) != 0)
     try IsLClick1Enabled := (Integer(IniRead(SettingsFile, "Enable", "LClickSeq1", IsLClick1Enabled ? 1 : 0)) != 0)
     try IsLClick2Enabled := (Integer(IniRead(SettingsFile, "Enable", "LClickSeq2", IsLClick2Enabled ? 1 : 0)) != 0)
+    try IsLClick3Enabled := (Integer(IniRead(SettingsFile, "Enable", "LClickSeq3", IsLClick3Enabled ? 1 : 0)) != 0)
 
     try AutoStartEnabled := (Integer(IniRead(SettingsFile, "General", "AutoStart", FileExist(AutoStartLink) ? 1 : 0)) != 0)
 }
 
 SaveKeySettings() {
     global SettingsFile
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled
+    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2, KeyLClick3
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled, IsLClick3Enabled
     global AutoStartEnabled
-    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs
+    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs, LClick3_HoldMs, LClick3_GapMs
 
     IniWrite(EscDelayMs,  SettingsFile, "Delays", "EscDelayMs")
     IniWrite(LClick1_HoldMs, SettingsFile, "Delays", "LClick1_HoldMs")
     IniWrite(LClick1_GapMs, SettingsFile, "Delays", "LClick1_GapMs")
     IniWrite(LClick2_HoldMs, SettingsFile, "Delays", "LClick2_HoldMs")
     IniWrite(LClick2_GapMs, SettingsFile, "Delays", "LClick2_GapMs")
+    IniWrite(LClick3_HoldMs, SettingsFile, "Delays", "LClick3_HoldMs")
+    IniWrite(LClick3_GapMs, SettingsFile, "Delays", "LClick3_GapMs")
 
     IniWrite(KeySpamD,      SettingsFile, "Keys", "DSpam")
     IniWrite(KeySpamS,      SettingsFile, "Keys", "SSpam")
@@ -234,6 +244,7 @@ SaveKeySettings() {
     IniWrite(KeyEscDouble,  SettingsFile, "Keys", "EscDouble")
     IniWrite(KeyLClick1, SettingsFile, "Keys", "LClickSeq1")
     IniWrite(KeyLClick2, SettingsFile, "Keys", "LClickSeq2")
+    IniWrite(KeyLClick3, SettingsFile, "Keys", "LClickSeq3")
 
     IniWrite(IsSpamDEnabled      ? 1 : 0, SettingsFile, "Enable", "DSpam")
     IniWrite(IsSpamSEnabled      ? 1 : 0, SettingsFile, "Enable", "SSpam")
@@ -241,6 +252,7 @@ SaveKeySettings() {
     IniWrite(IsEscDoubleEnabled  ? 1 : 0, SettingsFile, "Enable", "EscDouble")
     IniWrite(IsLClick1Enabled ? 1 : 0, SettingsFile, "Enable", "LClickSeq1")
     IniWrite(IsLClick2Enabled ? 1 : 0, SettingsFile, "Enable", "LClickSeq2")
+    IniWrite(IsLClick3Enabled ? 1 : 0, SettingsFile, "Enable", "LClickSeq3")
 
     IniWrite(AutoStartEnabled ? 1 : 0, SettingsFile, "General", "AutoStart")
 }
@@ -267,9 +279,9 @@ ToggleAutoStart(state) {
 ; CPS / 顯示與驗證
 ; ============================================================
 UpdateCpsInfo() {
-    global LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs
-    global TxtLClick1Info, TxtLClick2Info, TxtLClick1Warn, TxtLClick2Warn
-    global LClick1WarnPosX, LClick1WarnPosY, LClick2WarnPosX, LClick2WarnPosY, WarnOffsetXPx
+    global LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs, LClick3_HoldMs, LClick3_GapMs
+    global TxtLClick1Info, TxtLClick2Info, TxtLClick3Info, TxtLClick1Warn, TxtLClick2Warn, TxtLClick3Warn
+    global LClick1WarnPosX, LClick1WarnPosY, LClick2WarnPosX, LClick2WarnPosY, LClick3WarnPosX, LClick3WarnPosY, WarnOffsetXPx
 
     cycle1 := LClick1_HoldMs + LClick1_GapMs
     if (cycle1 > 0) {
@@ -310,11 +322,31 @@ UpdateCpsInfo() {
         TxtLClick2Warn.Value := ""
         TxtLClick2Warn.Visible := false
     }
+
+    cycle3 := LClick3_HoldMs + LClick3_GapMs
+    if (cycle3 > 0) {
+        cps3 := 1000.0 / cycle3
+        TxtLClick3Info.Value := Format("左鍵連點3：{1} + {2} = {3} ms (約 {4:.2f} 次/秒)", LClick3_HoldMs, LClick3_GapMs, cycle3, cps3)
+        TxtLClick3Info.Opt("cBlack")
+        if (cps3 > 4.1) {
+            TxtLClick3Warn.Value := "#超速警告"
+            TxtLClick3Warn.Visible := true
+            TxtLClick3Warn.Move(LClick3WarnPosX + WarnOffsetXPx, LClick3WarnPosY)
+        } else {
+            TxtLClick3Warn.Value := ""
+            TxtLClick3Warn.Visible := false
+        }
+    } else {
+        TxtLClick3Info.Value := "左鍵連點3：設定錯誤 (總時間為 0)"
+        TxtLClick3Info.Opt("cBlack")
+        TxtLClick3Warn.Value := ""
+        TxtLClick3Warn.Visible := false
+    }
 }
 
 UpdateCpsVisibility() {
-    global IsLClick1Enabled, IsLClick2Enabled
-    global TxtLClick1Info, TxtLClick2Info, TxtLClick1Warn, TxtLClick2Warn
+    global IsLClick1Enabled, IsLClick2Enabled, IsLClick3Enabled
+    global TxtLClick1Info, TxtLClick2Info, TxtLClick3Info, TxtLClick1Warn, TxtLClick2Warn, TxtLClick3Warn
 
     if IsSet(TxtLClick1Info) {
         if IsLClick1Enabled {
@@ -333,23 +365,33 @@ UpdateCpsVisibility() {
             TxtLClick2Warn.Visible := false
         }
     }
+
+    if IsSet(TxtLClick3Info) {
+        if IsLClick3Enabled {
+            TxtLClick3Info.Visible := true
+        } else {
+            TxtLClick3Info.Visible := false
+            TxtLClick3Warn.Visible := false
+        }
+    }
 }
 
 ; ============================================================
 ; 熱鍵綁定與狀態
 ; ============================================================
 UpdateAllHotkeys() {
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2
+    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2, KeyLClick3
     BindHotkey("DSpam",      KeySpamD,      HandleSpamD)
     BindHotkey("SSpam",      KeySpamS,      HandleSpamS)
     BindHotkey("ASpam",      KeySpamA,      HandleSpamA)
     BindHotkey("EscDouble",  KeyEscDouble,  HandleEscDouble)
     BindHotkey("LClickSeq1", KeyLClick1, HandleLClick1)
     BindHotkey("LClickSeq2", KeyLClick2, HandleLClick2)
+    BindHotkey("LClickSeq3", KeyLClick3, HandleLClick3)
 }
 
 BindHotkey(id, keyName, func) {
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled, IsLClick3Enabled
     global HotkeyHandlerMap, HotkeyBaseKeyMap
 
     enabled := true
@@ -360,6 +402,7 @@ BindHotkey(id, keyName, func) {
         case "EscDouble":   enabled := IsEscDoubleEnabled
         case "LClickSeq1":  enabled := IsLClick1Enabled
         case "LClickSeq2":  enabled := IsLClick2Enabled
+        case "LClickSeq3":  enabled := IsLClick3Enabled
     }
 
     HotkeyHandlerMap[id] := func
@@ -499,11 +542,33 @@ HandleLClick2(*) {
     }
 }
 
+HandleLClick3(*) {
+    global LClick3_HoldMs, LClick3_GapMs, KeyLClick3
+    allowed := IsScriptEnabledForContext()
+    if !allowed
+        return
+    ; 若實體左鍵已按住，先放開並等待一次休息間隔，避免卡住
+    if GetKeyState("LButton", "P") {
+        Send "{LButton up}"
+        WaitMs(LClick3_GapMs)
+    }
+    while GetKeyState(KeyLClick3, "P") {
+        Send "{LButton down}"
+        if !WaitMsCancel(LClick3_HoldMs, KeyLClick3) {
+            Send "{LButton up}"
+            break
+        }
+        Send "{LButton up}"
+        if !WaitMsCancel(LClick3_GapMs, KeyLClick3)
+            break
+    }
+}
+
 ; ============================================================
 ; 勾選事件與延遲顯示
 ; ============================================================
 SetFeatureEnabled(id, state) {
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled, IsLClick3Enabled
     global TxtStatus
 
     enabled := (state != 0)
@@ -514,6 +579,7 @@ SetFeatureEnabled(id, state) {
         case "EscDouble":  IsEscDoubleEnabled  := enabled
         case "LClickSeq1": IsLClick1Enabled := enabled
         case "LClickSeq2": IsLClick2Enabled := enabled
+        case "LClickSeq3": IsLClick3Enabled := enabled
     }
 
     SaveKeySettings()
@@ -526,7 +592,7 @@ SetFeatureEnabled(id, state) {
 
 SetDelayControlsEnabled() {
     global DelayCtrlMap
-    global IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled
+    global IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled, IsLClick3Enabled
 
     for id, ctrls in DelayCtrlMap {
         visible := true
@@ -534,6 +600,7 @@ SetDelayControlsEnabled() {
             case "EscDouble":  visible := IsEscDoubleEnabled
             case "LClickSeq1": visible := IsLClick1Enabled
             case "LClickSeq2": visible := IsLClick2Enabled
+            case "LClickSeq3": visible := IsLClick3Enabled
         }
         for _, ctrl in ctrls {
             try {
@@ -551,13 +618,13 @@ SetDelayControlsEnabled() {
 ; 延遲套用與驗證
 ; ============================================================
 ApplyDelayConfig(*) {
-    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs
-    global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap
+    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs, LClick3_HoldMs, LClick3_GapMs
+    global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap, EditLClick3Hold, EditLClick3Gap
     global TxtStatus
 
-    mins := [200, 200, 17, 200, 17]
-    labels := ["ESC 延遲", "左鍵連點1 按壓時間", "左鍵連點1 休息間隔", "左鍵連點2 按壓時間", "左鍵連點2 休息間隔"]
-    inputs := [EditEscDelay.Value, EditLClick1Hold.Value, EditLClick1Gap.Value, EditLClick2Hold.Value, EditLClick2Gap.Value]
+    mins := [200, 200, 17, 200, 17, 200, 17]
+    labels := ["ESC 延遲", "左鍵連點1 按壓時間", "左鍵連點1 休息間隔", "左鍵連點2 按壓時間", "左鍵連點2 休息間隔", "左鍵連點3 按壓時間", "左鍵連點3 休息間隔"]
+    inputs := [EditEscDelay.Value, EditLClick1Hold.Value, EditLClick1Gap.Value, EditLClick2Hold.Value, EditLClick2Gap.Value, EditLClick3Hold.Value, EditLClick3Gap.Value]
     parsed := []
 
     for idx, val in inputs {
@@ -580,6 +647,8 @@ ApplyDelayConfig(*) {
     LClick1_GapMs := parsed[3]
     LClick2_HoldMs := parsed[4]
     LClick2_GapMs := parsed[5]
+    LClick3_HoldMs := parsed[6]
+    LClick3_GapMs := parsed[7]
 
     SaveKeySettings()
     UpdateCpsInfo()
@@ -632,7 +701,7 @@ WM_XBUTTONDOWN(wParam, *) {
 FinishBinding(newKey) {
     global IsBinding, BindingActionId, BindingDisplayCtrl, BindingInputHook
     global TxtStatus
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2
+    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2, KeyLClick3
 
     if !IsBinding
         return
@@ -652,6 +721,7 @@ FinishBinding(newKey) {
         case "EscDouble":  KeyEscDouble  := newKey
         case "LClickSeq1": KeyLClick1 := newKey
         case "LClickSeq2": KeyLClick2 := newKey
+        case "LClickSeq3": KeyLClick3 := newKey
     }
 
     BindingDisplayCtrl.Value := newKey
@@ -699,12 +769,12 @@ ImportSettings(*) {
 ; ============================================================
 BuildGui() {
     global MainGui, TxtStatus, ChkAutoStart
-    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyLClick1, EditKeyLClick2
-    global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkLClick1, ChkLClick2
-    global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap
-    global LblEscDelay, LblLClick1Hold, LblLClick1Gap, LblLClick2Hold, LblLClick2Gap
-    global DelayCtrlMap, TxtLClick1Info, TxtLClick2Info, TxtLClick1Warn, TxtLClick2Warn
-    global LClick1WarnPosX, LClick1WarnPosY, LClick2WarnPosX, LClick2WarnPosY, WarnOffsetXPx
+    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyLClick1, EditKeyLClick2, EditKeyLClick3
+    global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkLClick1, ChkLClick2, ChkLClick3
+    global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap, EditLClick3Hold, EditLClick3Gap
+    global LblEscDelay, LblLClick1Hold, LblLClick1Gap, LblLClick2Hold, LblLClick2Gap, LblLClick3Hold, LblLClick3Gap
+    global DelayCtrlMap, TxtLClick1Info, TxtLClick2Info, TxtLClick3Info, TxtLClick1Warn, TxtLClick2Warn, TxtLClick3Warn
+    global LClick1WarnPosX, LClick1WarnPosY, LClick2WarnPosX, LClick2WarnPosY, LClick3WarnPosX, LClick3WarnPosY, WarnOffsetXPx
     global TxtNikkeStatus
 
     MainGui := Gui("+AlwaysOnTop")
@@ -754,6 +824,13 @@ BuildGui() {
     ChkLClick2 := MainGui.Add("CheckBox", (IsLClick2Enabled ? "Checked " : "") "x+5 yp+5", "啟用")
     ChkLClick2.OnEvent("Click", (*) => SetFeatureEnabled("LClickSeq2", ChkLClick2.Value))
 
+    MainGui.Add("Text", "xs yp+30", "左鍵連點3：")
+    EditKeyLClick3 := MainGui.Add("Edit", "x+5 w90 ReadOnly yp-5", KeyLClick3)
+    btnBindL3  := MainGui.Add("Button", "x+5 w80 yp-1", "變更")
+    btnBindL3.OnEvent("Click", (*) => StartCaptureBinding("LClickSeq3", EditKeyLClick3))
+    ChkLClick3 := MainGui.Add("CheckBox", (IsLClick3Enabled ? "Checked " : "") "x+5 yp+5", "啟用")
+    ChkLClick3.OnEvent("Click", (*) => SetFeatureEnabled("LClickSeq3", ChkLClick3.Value))
+
     MainGui.Add("Text", "xs yp+40 w380 h2 0x10", "")
     MainGui.Add("Text", "xs yp+10", "延遲設定：")
 
@@ -770,9 +847,15 @@ BuildGui() {
     LblLClick2Gap := MainGui.Add("Text", , "左鍵連點2：休息間隔 (ms)")
     EditLClick2Gap  := MainGui.Add("Edit", "w120", LClick2_GapMs)
 
+    LblLClick3Hold := MainGui.Add("Text", , "左鍵連點3：左鍵按壓時間 (ms)")
+    EditLClick3Hold  := MainGui.Add("Edit", "w120", LClick3_HoldMs)
+    LblLClick3Gap := MainGui.Add("Text", , "左鍵連點3：休息間隔 (ms)")
+    EditLClick3Gap  := MainGui.Add("Edit", "w120", LClick3_GapMs)
+
     DelayCtrlMap["EscDouble"]  := [LblEscDelay, EditEscDelay]
     DelayCtrlMap["LClickSeq1"] := [LblLClick1Hold, EditLClick1Hold, LblLClick1Gap, EditLClick1Gap]
     DelayCtrlMap["LClickSeq2"] := [LblLClick2Hold, EditLClick2Hold, LblLClick2Gap, EditLClick2Gap]
+    DelayCtrlMap["LClickSeq3"] := [LblLClick3Hold, EditLClick3Hold, LblLClick3Gap, EditLClick3Gap]
     SetDelayControlsEnabled()
 
     btnApply := MainGui.Add("Button", "w120", "套用延遲")
@@ -784,9 +867,12 @@ BuildGui() {
     TxtLClick1Warn := MainGui.Add("Text", "xp+237 yp w180 cRed", "")
     TxtLClick2Info := MainGui.Add("Text", "xs yp+20 w235", "")
     TxtLClick2Warn := MainGui.Add("Text", "xp+237 yp w180 cRed", "")
+    TxtLClick3Info := MainGui.Add("Text", "xs yp+20 w235", "")
+    TxtLClick3Warn := MainGui.Add("Text", "xp+237 yp w180 cRed", "")
     WarnOffsetXPx := 0
     TxtLClick1Warn.GetPos(&LClick1WarnPosX, &LClick1WarnPosY)
     TxtLClick2Warn.GetPos(&LClick2WarnPosX, &LClick2WarnPosY)
+    TxtLClick3Warn.GetPos(&LClick3WarnPosX, &LClick3WarnPosY)
     UpdateCpsInfo()
     UpdateCpsVisibility()
 
@@ -812,13 +898,13 @@ BuildGui() {
 }
 
 RefreshUI() {
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled
-    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs
+    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyLClick1, KeyLClick2, KeyLClick3
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsLClick1Enabled, IsLClick2Enabled, IsLClick3Enabled
+    global EscDelayMs, LClick1_HoldMs, LClick1_GapMs, LClick2_HoldMs, LClick2_GapMs, LClick3_HoldMs, LClick3_GapMs
     global AutoStartEnabled
-    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyLClick1, EditKeyLClick2
-    global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkLClick1, ChkLClick2
-    global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap
+    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyLClick1, EditKeyLClick2, EditKeyLClick3
+    global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkLClick1, ChkLClick2, ChkLClick3
+    global EditEscDelay, EditLClick1Hold, EditLClick1Gap, EditLClick2Hold, EditLClick2Gap, EditLClick3Hold, EditLClick3Gap
     global ChkAutoStart, TxtStatus
 
     EditKeySpamD.Value   := KeySpamD
@@ -827,6 +913,7 @@ RefreshUI() {
     EditKeyEscDouble.Value := KeyEscDouble
     EditKeyLClick1.Value  := KeyLClick1
     EditKeyLClick2.Value  := KeyLClick2
+    EditKeyLClick3.Value  := KeyLClick3
 
     ChkSpamD.Value   := IsSpamDEnabled      ? 1 : 0
     ChkSpamS.Value   := IsSpamSEnabled      ? 1 : 0
@@ -834,12 +921,15 @@ RefreshUI() {
     ChkEscDouble.Value := IsEscDoubleEnabled  ? 1 : 0
     ChkLClick1.Value  := IsLClick1Enabled ? 1 : 0
     ChkLClick2.Value  := IsLClick2Enabled ? 1 : 0
+    ChkLClick3.Value  := IsLClick3Enabled ? 1 : 0
 
     EditEscDelay.Value  := EscDelayMs
     EditLClick1Hold.Value := LClick1_HoldMs
     EditLClick1Gap.Value := LClick1_GapMs
     EditLClick2Hold.Value := LClick2_HoldMs
     EditLClick2Gap.Value := LClick2_GapMs
+    EditLClick3Hold.Value := LClick3_HoldMs
+    EditLClick3Gap.Value := LClick3_GapMs
 
     ChkAutoStart.Value := AutoStartEnabled ? 1 : 0
 
