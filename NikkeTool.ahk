@@ -1,5 +1,6 @@
-﻿#Requires AutoHotkey v2.0
-
+﻿
+#Requires AutoHotkey v2.0
+#UseHook  ; 強制鍵鼠熱鍵使用 hook，避免滑鼠鍵在送出點擊時讀不到實體狀態
 ; ============================================================
 ; 以系統管理員身分重新啟動
 ; ============================================================
@@ -67,7 +68,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.0"
+global AppVersion := "v1.01"
 
 ; ============================================================
 ; 初始化
@@ -388,7 +389,16 @@ ApplyHotkeyState(id, passThrough) {
     }
 
     normalized := NormalizeHotkeyName(base)
-    newHotkey := passThrough ? "~" normalized : normalized
+    isMouseKey := InStr(normalized, "Button")
+    ; 統一使用 $ 強制 hook，滑鼠再加 * 避免修飾鍵影響；背景放行時再加 ~
+    if isMouseKey {
+        newHotkey := passThrough ? "~*$" normalized : "*$" normalized
+    } else {
+        newHotkey := passThrough ? "~$" normalized : "$" normalized
+    }
+
+    if (current = newHotkey)
+        return  ; 不重綁相同熱鍵，避免迴圈中被關掉
 
     if (current != "")
         try Hotkey(current, "Off")
@@ -447,43 +457,45 @@ HandleEscDouble(*) {
 
 HandleLClick1(*) {
     global LClick1_HoldMs, LClick1_GapMs, KeyLClick1
-    if !IsScriptEnabledForContext()
+    allowed := IsScriptEnabledForContext()
+    if !allowed
         return
-    ; 若左鍵已被按住，先補一次放開，避免卡住
+    ; 若實體左鍵已按住，先放開並等待一次休息間隔，避免卡住
     if GetKeyState("LButton", "P") {
         Send "{LButton up}"
-        WaitMs(LClick1_GapMs)  ; 放掉後補休息間隔
+        WaitMs(LClick1_GapMs)
     }
-    if GetKeyState(KeyLClick1, "P") {
-        while GetKeyState(KeyLClick1, "P") {
-            if !IsScriptEnabledForContext()
-                break
-            Send "{LButton down}"
-            WaitMs(LClick1_HoldMs)
+    while GetKeyState(KeyLClick1, "P") {
+        Send "{LButton down}"
+        if !WaitMsCancel(LClick1_HoldMs, KeyLClick1) {
             Send "{LButton up}"
-            WaitMs(LClick1_GapMs)
+            break
         }
+        Send "{LButton up}"
+        if !WaitMsCancel(LClick1_GapMs, KeyLClick1)
+            break
     }
 }
 
 HandleLClick2(*) {
     global LClick2_HoldMs, LClick2_GapMs, KeyLClick2
-    if !IsScriptEnabledForContext()
+    allowed := IsScriptEnabledForContext()
+    if !allowed
         return
-    ; 若左鍵已被按住，先補一次放開，避免卡住
+    ; 若實體左鍵已按住，先放開並等待一次休息間隔，避免卡住
     if GetKeyState("LButton", "P") {
         Send "{LButton up}"
-        WaitMs(LClick2_GapMs)  ; 放掉後補休息間隔
+        WaitMs(LClick2_GapMs)
     }
-    if GetKeyState(KeyLClick2, "P") {
-        while GetKeyState(KeyLClick2, "P") {
-            if !IsScriptEnabledForContext()
-                break
-            Send "{LButton down}"
-            WaitMs(LClick2_HoldMs)
+    while GetKeyState(KeyLClick2, "P") {
+        Send "{LButton down}"
+        if !WaitMsCancel(LClick2_HoldMs, KeyLClick2) {
             Send "{LButton up}"
-            WaitMs(LClick2_GapMs)
+            break
         }
+        Send "{LButton up}"
+        if !WaitMsCancel(LClick2_GapMs, KeyLClick2)
+            break
     }
 }
 
@@ -612,7 +624,8 @@ WM_LButtonDown(*)    => FinishBinding("LButton")
 WM_RBUTTONDOWN(*)    => FinishBinding("RButton")
 WM_MBUTTONDOWN(*)    => FinishBinding("MButton")
 WM_XBUTTONDOWN(wParam, *) {
-    btn := (wParam & 0x0001) ? "XButton1" : "XButton2"
+    ; WM_XBUTTONDOWN 的高位元組標示按下的是哪顆側鍵：1= XButton1, 2= XButton2
+    btn := (((wParam >> 16) & 0xFFFF) == 1) ? "XButton1" : "XButton2"
     FinishBinding(btn)
 }
 
