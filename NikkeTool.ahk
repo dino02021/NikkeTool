@@ -61,6 +61,9 @@ global EnableCursorLock := false
 global HotkeyCurrentMap := Map()
 global HotkeyHandlerMap := Map()
 global HotkeyBaseKeyMap := Map()
+global LastForegroundState := false
+global ContextDebounceTimerRunning := false
+global ContextDebounceDelayMs := 250
 
 ; GUI 控制項
 global MainGui
@@ -81,7 +84,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.04"
+global AppVersion := "v1.041"
 
 ; ============================================================
 ; 初始化
@@ -95,7 +98,8 @@ Init() {
     LoadSettings()
     ApplyAutoStart()
     UpdateAllHotkeys()
-    UpdateContextHotkeys()
+    LastForegroundState := IsNikkeForeground()
+    ApplyContextState(LastForegroundState)
     BuildGui()
     SetTimer(CursorLockTick, 200)
     OnExit(UnlockCursor)
@@ -166,12 +170,38 @@ ToggleCursorLock(state) {
 }
 
 UpdateContextHotkeys() {
-    global HotkeyBaseKeyMap
+    global LastForegroundState, ContextDebounceTimerRunning, ContextDebounceDelayMs
     wantForeground := IsNikkeForeground()
+    if (wantForeground = LastForegroundState)
+        return
+
+    if wantForeground {
+        ; 回到前景時立即開啟熱鍵，並取消任何待處理的關閉防抖
+        ContextDebounceTimerRunning := false
+        SetTimer(ContextDebounceTick, 0)
+        ApplyContextState(true)
+    } else {
+        ; 離開前景時啟動防抖，延後關閉熱鍵
+        if ContextDebounceTimerRunning
+            return
+        ContextDebounceTimerRunning := true
+        SetTimer(ContextDebounceTick, -ContextDebounceDelayMs)
+    }
+}
+
+ContextDebounceTick(*) {
+    global ContextDebounceTimerRunning
+    ContextDebounceTimerRunning := false
+    ApplyContextState(IsNikkeForeground())
+}
+
+ApplyContextState(wantForeground) {
+    global HotkeyBaseKeyMap, LastForegroundState
     passThroughNeeded := !wantForeground
     for id, _ in HotkeyBaseKeyMap {
         ApplyHotkeyState(id, passThroughNeeded)
     }
+    LastForegroundState := wantForeground
 }
 
 UpdateNikkeStatus(*) {
