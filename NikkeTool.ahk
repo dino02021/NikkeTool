@@ -53,6 +53,10 @@ global AutoStartEnabled := false
 ; QPC
 global QPCFreq := 0
 
+; 滑鼠鎖定
+global IsCursorLocked := false
+global EnableCursorLock := false
+
 ; 熱鍵資料
 global HotkeyCurrentMap := Map()
 global HotkeyHandlerMap := Map()
@@ -64,7 +68,7 @@ global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1
 global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
 global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
 global LblEscDelay, LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
-global TxtStatus, ChkAutoStart, TxtNikkeStatus
+global TxtStatus, ChkAutoStart, TxtNikkeStatus, ChkCursorLock
 global DelayCtrlMap := Map()
 global FeatureCtrlMap := Map()
 global TxtClick1Info, TxtClick2Info, TxtClick3Info, TxtClick1Warn, TxtClick2Warn, TxtClick3Warn
@@ -77,7 +81,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.03"
+global AppVersion := "v1.04"
 
 ; ============================================================
 ; 初始化
@@ -93,6 +97,8 @@ Init() {
     UpdateAllHotkeys()
     UpdateContextHotkeys()
     BuildGui()
+    SetTimer(CursorLockTick, 200)
+    OnExit(UnlockCursor)
     A_IconTip := "Nikke小工具 " AppVersion " - Yabi"
 }
 
@@ -100,15 +106,63 @@ Init() {
 ; 遊戲前景判斷
 ; ============================================================
 IsNikkeForeground() {
-    try {
-        return WinGetProcessName("A") = "nikke.exe"
-    } catch {
-        return false
-    }
+    return WinActive("ahk_exe nikke.exe") ? true : false
 }
 
 IsScriptEnabledForContext() {
     return IsNikkeForeground()
+}
+
+CursorLockTick(*) {
+    global EnableCursorLock
+    if EnableCursorLock && IsNikkeForeground() {
+        LockCursorToNikke()
+    } else {
+        UnlockCursor()
+    }
+}
+
+LockCursorToNikke() {
+    global IsCursorLocked
+    try {
+        hwnd := WinExist("ahk_exe nikke.exe")
+        if !hwnd {
+            UnlockCursor()
+            return
+        }
+        ; 取客戶區座標，避免碰到邊框 resize 熱區
+        WinGetClientPos(&x, &y, &w, &h, "ahk_id " hwnd)
+        rect := Buffer(16, 0)
+        NumPut("Int", x, rect, 0)
+        NumPut("Int", y, rect, 4)
+        NumPut("Int", x + w, rect, 8)
+        NumPut("Int", y + h, rect, 12)
+        if DllCall("ClipCursor", "Ptr", rect.Ptr, "Int") {
+            IsCursorLocked := true
+        }
+    } catch {
+        ; 若失敗則解鎖
+        UnlockCursor()
+    }
+}
+
+UnlockCursor(*) {
+    global IsCursorLocked
+    if IsCursorLocked {
+        DllCall("ClipCursor", "Ptr", 0)
+        IsCursorLocked := false
+    }
+}
+
+ToggleCursorLock(state) {
+    global EnableCursorLock
+    EnableCursorLock := (state != 0)
+    SaveKeySettings()
+    if EnableCursorLock && IsNikkeForeground() {
+        LockCursorToNikke()
+    } else {
+        UnlockCursor()
+    }
 }
 
 UpdateContextHotkeys() {
@@ -189,7 +243,7 @@ WaitMs(ms) => BusyWaitMs(ms)
 WaitMsCancel(ms, cancelKey) => BusyWaitMsCancel(ms, cancelKey)
 
 GetClickButtonLabel(btn) {
-    return (btn = "RButton") ? "右鍵" : "左鍵"
+    return (btn = "RButton") ? "✓ 右鍵" : "✓ 左鍵"
 }
 
 SetClickButtonText(seq, btn) {
@@ -235,7 +289,7 @@ LoadSettings() {
     global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
     global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
     global ClickBtn1, ClickBtn2, ClickBtn3
-    global AutoStartEnabled
+    global AutoStartEnabled, EnableCursorLock
 
     if !FileExist(SettingsFile)
         return
@@ -269,13 +323,14 @@ LoadSettings() {
     try IsClick3Enabled := (Integer(IniRead(SettingsFile, "Enable", "ClickSeq3", IsClick3Enabled ? 1 : 0)) != 0)
 
     try AutoStartEnabled := (Integer(IniRead(SettingsFile, "General", "AutoStart", FileExist(AutoStartLink) ? 1 : 0)) != 0)
+    try EnableCursorLock := (Integer(IniRead(SettingsFile, "General", "CursorLock", EnableCursorLock ? 1 : 0)) != 0)
 }
 
 SaveKeySettings() {
     global SettingsFile
     global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
     global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
-    global AutoStartEnabled
+    global AutoStartEnabled, EnableCursorLock
     global EscDelayMs, Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
     global ClickBtn1, ClickBtn2, ClickBtn3
 
@@ -308,6 +363,7 @@ SaveKeySettings() {
     IniWrite(IsClick3Enabled ? 1 : 0, SettingsFile, "Enable", "ClickSeq3")
 
     IniWrite(AutoStartEnabled ? 1 : 0, SettingsFile, "General", "AutoStart")
+    IniWrite(EnableCursorLock ? 1 : 0, SettingsFile, "General", "CursorLock")
 }
 
 ApplyAutoStart() {
@@ -1013,6 +1069,10 @@ BuildGui() {
     ChkAutoStart.Value := AutoStartEnabled ? 1 : 0
     ChkAutoStart.OnEvent("Click", (*) => ToggleAutoStart(ChkAutoStart.Value))
 
+    ChkCursorLock := MainGui.Add("CheckBox", "xs yp+20", "遊戲中鎖定滑鼠鼠標")
+    ChkCursorLock.Value := EnableCursorLock ? 1 : 0
+    ChkCursorLock.OnEvent("Click", (*) => ToggleCursorLock(ChkCursorLock.Value))
+
     btnOpenFolder := MainGui.Add("Button", "xs yp+25 w140", "開啟設定資料夾")
     btnOpenFolder.OnEvent("Click", OpenSettingsFolder)
     btnExport := MainGui.Add("Button", "x+10 w90", "匯出設定")
@@ -1038,7 +1098,7 @@ RefreshUI() {
     global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1, EditKeyClick2, EditKeyClick3
     global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
     global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
-    global ChkAutoStart, TxtStatus
+    global ChkAutoStart, TxtStatus, ChkCursorLock, EnableCursorLock
 
     EditKeySpamD.Value   := KeySpamD
     EditKeySpamS.Value   := KeySpamS
@@ -1068,7 +1128,6 @@ RefreshUI() {
     EditClick3Gap.Value := Click3_GapMs
 
     ChkAutoStart.Value := AutoStartEnabled ? 1 : 0
-
     UpdateCpsInfo()
     UpdateCpsVisibility()
     UpdateNikkeStatus()
@@ -1089,6 +1148,7 @@ A_TrayMenu.Delete()
 A_TrayMenu.Add("開啟控制面板 (&O)", ShowGui)
 A_TrayMenu.Add()
 A_TrayMenu.Add("退出 (&X)", (*) => ExitApp())
+A_TrayMenu.Default := "開啟控制面板 (&O)"  ; 雙擊托盤圖示直接開面板
 
 ; ============================================================
 ; 執行
