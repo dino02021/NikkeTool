@@ -56,6 +56,7 @@ global QPCFreq := 0
 ; 滑鼠鎖定
 global IsCursorLocked := false
 global EnableCursorLock := false
+global EnableGlobalHotkeys := false
 
 ; 熱鍵資料
 global HotkeyCurrentMap := Map()
@@ -72,6 +73,7 @@ global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClic
 global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
 global LblEscDelay, LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
 global TxtStatus, ChkAutoStart, TxtNikkeStatus, ChkCursorLock
+global ChkGlobalHotkeys
 global DelayCtrlMap := Map()
 global FeatureCtrlMap := Map()
 global TxtClick1Info, TxtClick2Info, TxtClick3Info, TxtClick1Warn, TxtClick2Warn, TxtClick3Warn
@@ -84,7 +86,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.041"
+global AppVersion := "v1.05"
 
 ; ============================================================
 ; 初始化
@@ -98,7 +100,7 @@ Init() {
     LoadSettings()
     ApplyAutoStart()
     UpdateAllHotkeys()
-    LastForegroundState := IsNikkeForeground()
+    LastForegroundState := (EnableGlobalHotkeys || IsNikkeForeground())
     ApplyContextState(LastForegroundState)
     BuildGui()
     SetTimer(CursorLockTick, 200)
@@ -114,7 +116,7 @@ IsNikkeForeground() {
 }
 
 IsScriptEnabledForContext() {
-    return IsNikkeForeground()
+    return EnableGlobalHotkeys ? true : IsNikkeForeground()
 }
 
 CursorLockTick(*) {
@@ -169,13 +171,26 @@ ToggleCursorLock(state) {
     }
 }
 
+ToggleGlobalHotkeys(state) {
+    global EnableGlobalHotkeys, ContextDebounceTimerRunning
+    EnableGlobalHotkeys := (state != 0)
+    SaveKeySettings()
+    if EnableGlobalHotkeys {
+        ContextDebounceTimerRunning := false
+        SetTimer(ContextDebounceTick, 0)
+        ApplyContextState(true)
+    } else {
+        UpdateContextHotkeys()
+    }
+}
+
 UpdateContextHotkeys() {
-    global LastForegroundState, ContextDebounceTimerRunning, ContextDebounceDelayMs
-    wantForeground := IsNikkeForeground()
-    if (wantForeground = LastForegroundState)
+    global LastForegroundState, ContextDebounceTimerRunning, ContextDebounceDelayMs, EnableGlobalHotkeys
+    wantActive := EnableGlobalHotkeys || IsNikkeForeground()
+    if (wantActive = LastForegroundState)
         return
 
-    if wantForeground {
+    if wantActive {
         ; 回到前景時立即開啟熱鍵，並取消任何待處理的關閉防抖
         ContextDebounceTimerRunning := false
         SetTimer(ContextDebounceTick, 0)
@@ -192,7 +207,7 @@ UpdateContextHotkeys() {
 ContextDebounceTick(*) {
     global ContextDebounceTimerRunning
     ContextDebounceTimerRunning := false
-    ApplyContextState(IsNikkeForeground())
+    ApplyContextState(EnableGlobalHotkeys || IsNikkeForeground())
 }
 
 ApplyContextState(wantForeground) {
@@ -319,7 +334,7 @@ LoadSettings() {
     global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
     global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
     global ClickBtn1, ClickBtn2, ClickBtn3
-    global AutoStartEnabled, EnableCursorLock
+    global AutoStartEnabled, EnableCursorLock, EnableGlobalHotkeys
 
     if !FileExist(SettingsFile)
         return
@@ -354,13 +369,14 @@ LoadSettings() {
 
     try AutoStartEnabled := (Integer(IniRead(SettingsFile, "General", "AutoStart", FileExist(AutoStartLink) ? 1 : 0)) != 0)
     try EnableCursorLock := (Integer(IniRead(SettingsFile, "General", "CursorLock", EnableCursorLock ? 1 : 0)) != 0)
+    try EnableGlobalHotkeys := (Integer(IniRead(SettingsFile, "General", "GlobalHotkeys", EnableGlobalHotkeys ? 1 : 0)) != 0)
 }
 
 SaveKeySettings() {
     global SettingsFile
     global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
     global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
-    global AutoStartEnabled, EnableCursorLock
+    global AutoStartEnabled, EnableCursorLock, EnableGlobalHotkeys
     global EscDelayMs, Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
     global ClickBtn1, ClickBtn2, ClickBtn3
 
@@ -394,6 +410,7 @@ SaveKeySettings() {
 
     IniWrite(AutoStartEnabled ? 1 : 0, SettingsFile, "General", "AutoStart")
     IniWrite(EnableCursorLock ? 1 : 0, SettingsFile, "General", "CursorLock")
+    IniWrite(EnableGlobalHotkeys ? 1 : 0, SettingsFile, "General", "GlobalHotkeys")
 }
 
 ApplyAutoStart() {
@@ -1099,9 +1116,13 @@ BuildGui() {
     ChkAutoStart.Value := AutoStartEnabled ? 1 : 0
     ChkAutoStart.OnEvent("Click", (*) => ToggleAutoStart(ChkAutoStart.Value))
 
-    ChkCursorLock := MainGui.Add("CheckBox", "xs yp+20", "遊戲中鎖定滑鼠鼠標")
+    ChkCursorLock := MainGui.Add("CheckBox", "xs yp+20", "鎖定滑鼠於遊戲視窗內")
     ChkCursorLock.Value := EnableCursorLock ? 1 : 0
     ChkCursorLock.OnEvent("Click", (*) => ToggleCursorLock(ChkCursorLock.Value))
+
+    ChkGlobalHotkeys := MainGui.Add("CheckBox", "xs yp+20", "全域啟用熱鍵")
+    ChkGlobalHotkeys.Value := EnableGlobalHotkeys ? 1 : 0
+    ChkGlobalHotkeys.OnEvent("Click", (*) => ToggleGlobalHotkeys(ChkGlobalHotkeys.Value))
 
     btnOpenFolder := MainGui.Add("Button", "xs yp+25 w140", "開啟設定資料夾")
     btnOpenFolder.OnEvent("Click", OpenSettingsFolder)
@@ -1128,7 +1149,7 @@ RefreshUI() {
     global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1, EditKeyClick2, EditKeyClick3
     global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
     global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
-    global ChkAutoStart, TxtStatus, ChkCursorLock, EnableCursorLock
+    global ChkAutoStart, TxtStatus, ChkCursorLock, EnableCursorLock, ChkGlobalHotkeys, EnableGlobalHotkeys
 
     EditKeySpamD.Value   := KeySpamD
     EditKeySpamS.Value   := KeySpamS
@@ -1158,6 +1179,8 @@ RefreshUI() {
     EditClick3Gap.Value := Click3_GapMs
 
     ChkAutoStart.Value := AutoStartEnabled ? 1 : 0
+    if IsSet(ChkGlobalHotkeys)
+        ChkGlobalHotkeys.Value := EnableGlobalHotkeys ? 1 : 0
     UpdateCpsInfo()
     UpdateCpsVisibility()
     UpdateNikkeStatus()
