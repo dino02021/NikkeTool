@@ -72,7 +72,7 @@ global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1
 global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
 global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
 global LblEscDelay, LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
-global TxtStatus, ChkAutoStart, TxtNikkeStatus, ChkCursorLock
+global TxtStatus, ChkAutoStart, TxtNikkeStatus
 global ChkGlobalHotkeys
 global DelayCtrlMap := Map()
 global FeatureCtrlMap := Map()
@@ -86,7 +86,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.05"
+global AppVersion := "v1.06"
 
 ; ============================================================
 ; 初始化
@@ -254,11 +254,16 @@ BusyWaitMs(ms) {
         Sleep(ms)
         return
     }
-    start := 0, now := 0
+    start := 0, now := 0, yieldCount := 0
     DllCall("QueryPerformanceCounter", "Int64*", &start)
     target := start + (QPCFreq * ms // 1000)
     while true {
         DllCall("QueryPerformanceCounter", "Int64*", &now)
+        yieldCount += 1
+        if (yieldCount >= 200) {
+            Sleep(0)
+            yieldCount := 0
+        }
         if (now >= target)
             break
     }
@@ -271,10 +276,15 @@ BusyWaitMsCancel(ms, cancelKey) {
         Sleep(ms)
         return false
     }
-    start := 0, now := 0
+    start := 0, now := 0, yieldCount := 0
     DllCall("QueryPerformanceCounter", "Int64*", &start)
     target := start + (QPCFreq * ms // 1000)
     while true {
+        yieldCount += 1
+        if (yieldCount >= 200) {
+            Sleep(0)
+            yieldCount := 0
+        }
         if (cancelKey != "" && !GetKeyState(cancelKey, "P"))
             return false
         DllCall("QueryPerformanceCounter", "Int64*", &now)
@@ -1149,7 +1159,7 @@ RefreshUI() {
     global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1, EditKeyClick2, EditKeyClick3
     global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
     global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
-    global ChkAutoStart, TxtStatus, ChkCursorLock, EnableCursorLock, ChkGlobalHotkeys, EnableGlobalHotkeys
+    global ChkAutoStart, TxtStatus, EnableCursorLock, ChkGlobalHotkeys, EnableGlobalHotkeys
 
     EditKeySpamD.Value   := KeySpamD
     EditKeySpamS.Value   := KeySpamS
