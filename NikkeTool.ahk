@@ -15,6 +15,7 @@ if !A_IsAdmin {
 SettingsDir      := A_MyDocuments "\NikkeToolSettings"
 global SettingsFile := SettingsDir "\NikkeToolSettings.ini"
 global AutoStartLink := A_Startup "\NikkeToolStarter.lnk"
+global LogFile := SettingsDir "\NikkeToolDebug.log"
 
 ; 延遲預設
 global EscDelayMs  := 220
@@ -65,6 +66,7 @@ global HotkeyBaseKeyMap := Map()
 global LastForegroundState := false
 global ContextDebounceTimerRunning := false
 global ContextDebounceDelayMs := 250
+global HotkeyHealthTimerMs := 500
 
 ; GUI 控制項
 global MainGui
@@ -86,7 +88,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.06"
+global AppVersion := "v1.07"
 
 ; ============================================================
 ; 初始化
@@ -104,6 +106,7 @@ Init() {
     ApplyContextState(LastForegroundState)
     BuildGui()
     SetTimer(CursorLockTick, 200)
+    SetTimer(HotkeyHealthTick, HotkeyHealthTimerMs)
     OnExit(UnlockCursor)
     A_IconTip := "Nikke小工具 " AppVersion " - Yabi"
 }
@@ -164,6 +167,7 @@ ToggleCursorLock(state) {
     global EnableCursorLock
     EnableCursorLock := (state != 0)
     SaveKeySettings()
+    LogDebug("ToggleCursorLock: " (EnableCursorLock ? "ON" : "OFF"))
     if EnableCursorLock && IsNikkeForeground() {
         LockCursorToNikke()
     } else {
@@ -175,12 +179,25 @@ ToggleGlobalHotkeys(state) {
     global EnableGlobalHotkeys, ContextDebounceTimerRunning
     EnableGlobalHotkeys := (state != 0)
     SaveKeySettings()
+    LogDebug("ToggleGlobalHotkeys: " (EnableGlobalHotkeys ? "ON" : "OFF"))
     if EnableGlobalHotkeys {
         ContextDebounceTimerRunning := false
         SetTimer(ContextDebounceTick, 0)
         ApplyContextState(true)
     } else {
         UpdateContextHotkeys()
+    }
+}
+
+HotkeyHealthTick(*) {
+    global HotkeyBaseKeyMap, HotkeyCurrentMap
+    for id, _ in HotkeyBaseKeyMap {
+        base := HotkeyBaseKeyMap[id]
+        current := HotkeyCurrentMap.Has(id) ? HotkeyCurrentMap[id] : ""
+        if (base != "" && current = "") {
+            LogDebug("HotkeyHealth: rebind " id " (base=" base ") current empty")
+            ApplyHotkeyState(id, !IsScriptEnabledForContext())
+        }
     }
 }
 
@@ -215,6 +232,9 @@ ApplyContextState(wantForeground) {
     passThroughNeeded := !wantForeground
     for id, _ in HotkeyBaseKeyMap {
         ApplyHotkeyState(id, passThroughNeeded)
+    }
+    if (wantForeground != LastForegroundState) {
+        LogDebug("ApplyContextState: hotkeys " (wantForeground ? "ENABLED (fg/global)" : "DISABLED (bg)") )
     }
     LastForegroundState := wantForeground
 }
@@ -333,6 +353,12 @@ ToggleClickSide(seq) {
     }
     SetClickButtonText(seq, btn)
     SaveKeySettings()
+}
+
+LogDebug(msg) {
+    global LogFile
+    ts := FormatTime(, "yyyy-MM-dd HH:mm:ss")
+    try FileAppend(ts " - " msg "`n", LogFile, "UTF-8")
 }
 
 ; ============================================================
@@ -609,6 +635,7 @@ BindHotkey(id, keyName, func) {
 
     HotkeyHandlerMap[id] := func
     HotkeyBaseKeyMap[id] := (enabled && keyName != "") ? keyName : ""
+    LogDebug("BindHotkey: " id " -> " (HotkeyBaseKeyMap[id] = "" ? "EMPTY" : HotkeyBaseKeyMap[id]) " (enabled=" enabled ")")
     ApplyHotkeyState(id, !IsScriptEnabledForContext())
 }
 
@@ -645,11 +672,20 @@ ApplyHotkeyState(id, passThrough) {
     if (current = newHotkey)
         return  ; 不重綁相同熱鍵，避免迴圈中被關掉
 
-    if (current != "")
+    if (current != "") {
         try Hotkey(current, "Off")
+        catch as e {
+            LogDebug("Hotkey off fail: id=" id " hotkey=" current " err=" e.Message)
+        }
+    }
 
-    Hotkey(newHotkey, handler, "On")
-    HotkeyCurrentMap[id] := newHotkey
+    try {
+        Hotkey(newHotkey, handler, "On")
+        HotkeyCurrentMap[id] := newHotkey
+    } catch as e {
+        LogDebug("Hotkey on fail: id=" id " hotkey=" newHotkey " err=" e.Message)
+        HotkeyCurrentMap[id] := ""
+    }
 }
 
 ; ============================================================
