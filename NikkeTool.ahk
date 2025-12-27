@@ -88,7 +88,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.081"
+global AppVersion := "v1.082"
 
 ; ============================================================
 ; 初始化
@@ -275,14 +275,24 @@ BusyWaitMs(ms) {
         Sleep(ms)
         return
     }
-    start := 0, now := 0
+    start := 0, now := 0, loopCount := 0
     DllCall("QueryPerformanceCounter", "Int64*", &start)
     target := start + (QPCFreq * ms // 1000)
+    timeoutTick := target + (QPCFreq * 10 // 1000)  ; 目標再多給 10ms 緩衝
     while true {
         DllCall("QueryPerformanceCounter", "Int64*", &now)
         Sleep(0)
+        loopCount += 1
         if (now >= target)
             break
+        if (now >= timeoutTick) {
+            LogDebug("BusyWaitMs timeout: ms=" ms " loop=" loopCount)
+            break
+        }
+        if (loopCount >= 1000000) {
+            LogDebug("BusyWaitMs loop limit: ms=" ms " loop=" loopCount)
+            break
+        }
     }
 }
 
@@ -293,16 +303,26 @@ BusyWaitMsCancel(ms, cancelKey) {
         Sleep(ms)
         return false
     }
-    start := 0, now := 0
+    start := 0, now := 0, loopCount := 0
     DllCall("QueryPerformanceCounter", "Int64*", &start)
     target := start + (QPCFreq * ms // 1000)
+    timeoutTick := target + (QPCFreq * 10 // 1000)
     while true {
         Sleep(0)
         if (cancelKey != "" && !GetKeyState(cancelKey, "P"))
             return false
         DllCall("QueryPerformanceCounter", "Int64*", &now)
+        loopCount += 1
         if (now >= target)
             break
+        if (now >= timeoutTick) {
+            LogDebug("BusyWaitMsCancel timeout: ms=" ms " loop=" loopCount)
+            return false
+        }
+        if (loopCount >= 1000000) {
+            LogDebug("BusyWaitMsCancel loop limit: ms=" ms " loop=" loopCount)
+            return false
+        }
     }
     return true
 }
