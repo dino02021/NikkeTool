@@ -88,7 +88,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.07"
+global AppVersion := "v1.08"
 
 ; ============================================================
 ; 初始化
@@ -98,6 +98,7 @@ Init() {
     if !DirExist(SettingsDir) {
         DirCreate(SettingsDir)
     }
+    ProcessSetPriority("AboveNormal")
 
     LoadSettings()
     ApplyAutoStart()
@@ -280,7 +281,7 @@ BusyWaitMs(ms) {
     while true {
         DllCall("QueryPerformanceCounter", "Int64*", &now)
         yieldCount += 1
-        if (yieldCount >= 200) {
+        if (yieldCount >= 50) {
             Sleep(0)
             yieldCount := 0
         }
@@ -301,7 +302,7 @@ BusyWaitMsCancel(ms, cancelKey) {
     target := start + (QPCFreq * ms // 1000)
     while true {
         yieldCount += 1
-        if (yieldCount >= 200) {
+        if (yieldCount >= 50) {
             Sleep(0)
             yieldCount := 0
         }
