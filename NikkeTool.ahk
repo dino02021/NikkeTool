@@ -25,7 +25,7 @@ global Click2_HoldMs := 240
 global Click2_GapMs := 40
 global Click3_HoldMs := 240
 global Click3_GapMs := 40
-global KeySpamDelayMs  := 17
+global KeySpamDelayMs  := 34
 
 ; 預設綁定鍵
 global KeySpamD      := "F13"
@@ -88,7 +88,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.08"
+global AppVersion := "v1.081"
 
 ; ============================================================
 ; 初始化
@@ -275,16 +275,12 @@ BusyWaitMs(ms) {
         Sleep(ms)
         return
     }
-    start := 0, now := 0, yieldCount := 0
+    start := 0, now := 0
     DllCall("QueryPerformanceCounter", "Int64*", &start)
     target := start + (QPCFreq * ms // 1000)
     while true {
         DllCall("QueryPerformanceCounter", "Int64*", &now)
-        yieldCount += 1
-        if (yieldCount >= 50) {
-            Sleep(0)
-            yieldCount := 0
-        }
+        Sleep(0)
         if (now >= target)
             break
     }
@@ -297,15 +293,11 @@ BusyWaitMsCancel(ms, cancelKey) {
         Sleep(ms)
         return false
     }
-    start := 0, now := 0, yieldCount := 0
+    start := 0, now := 0
     DllCall("QueryPerformanceCounter", "Int64*", &start)
     target := start + (QPCFreq * ms // 1000)
     while true {
-        yieldCount += 1
-        if (yieldCount >= 50) {
-            Sleep(0)
-            yieldCount := 0
-        }
+        Sleep(0)
         if (cancelKey != "" && !GetKeyState(cancelKey, "P"))
             return false
         DllCall("QueryPerformanceCounter", "Int64*", &now)
@@ -700,7 +692,7 @@ HandleSpamD(*) {
         if !IsScriptEnabledForContext()
             break
         Send "d"
-        WaitMs(KeySpamDelayMs)
+        Sleep(KeySpamDelayMs)
     }
 }
 
@@ -712,7 +704,7 @@ HandleSpamS(*) {
         if !IsScriptEnabledForContext()
             break
         Send "s"
-        WaitMs(KeySpamDelayMs)
+        Sleep(KeySpamDelayMs)
     }
 }
 
@@ -724,7 +716,7 @@ HandleSpamA(*) {
         if !IsScriptEnabledForContext()
             break
         Send "a"
-        WaitMs(KeySpamDelayMs)
+        Sleep(KeySpamDelayMs)
     }
 }
 
@@ -733,7 +725,7 @@ HandleEscDouble(*) {
     if !IsScriptEnabledForContext()
         return
     Send "{Esc}"
-    WaitMs(EscDelayMs)
+    Sleep(EscDelayMs)
     Send "{Esc}"
 }
 
