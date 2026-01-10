@@ -88,7 +88,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.082"
+global AppVersion := "v1.09"
 
 ; ============================================================
 ; 初始化
@@ -286,11 +286,8 @@ BusyWaitMs(ms) {
         if (now >= target)
             break
         if (now >= timeoutTick) {
-            LogDebug("BusyWaitMs timeout: ms=" ms " loop=" loopCount)
-            break
-        }
-        if (loopCount >= 1000000) {
-            LogDebug("BusyWaitMs loop limit: ms=" ms " loop=" loopCount)
+            elapsedMs := (now - start) * 1000 // QPCFreq
+            LogDebug("BusyWaitMs timeout: ms=" ms " elapsed=" elapsedMs " loop=" loopCount)
             break
         }
     }
@@ -316,15 +313,22 @@ BusyWaitMsCancel(ms, cancelKey) {
         if (now >= target)
             break
         if (now >= timeoutTick) {
-            LogDebug("BusyWaitMsCancel timeout: ms=" ms " loop=" loopCount)
+            elapsedMs := (now - start) * 1000 // QPCFreq
+            LogDebug("BusyWaitMsCancel timeout: ms=" ms " elapsed=" elapsedMs " loop=" loopCount)
             return false
         }
         if (loopCount >= 1000000) {
-            LogDebug("BusyWaitMsCancel loop limit: ms=" ms " loop=" loopCount)
+            elapsedMs := (now - start) * 1000 // QPCFreq
+            LogDebug("BusyWaitMsCancel loop limit: ms=" ms " elapsed=" elapsedMs " loop=" loopCount)
             return false
         }
     }
     return true
+}
+
+KeyStillDown(key) {
+    ; 物理或邏輯任一為按下即視為仍按住，減少漏判
+    return GetKeyState(key, "P") || GetKeyState(key)
 }
 
 WaitMs(ms) => BusyWaitMs(ms)
@@ -708,7 +712,7 @@ HandleSpamD(*) {
     global KeySpamD, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    while GetKeyState(KeySpamD, "P") {
+    while KeyStillDown(KeySpamD) {
         if !IsScriptEnabledForContext()
             break
         Send "d"
@@ -720,7 +724,7 @@ HandleSpamS(*) {
     global KeySpamS, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    while GetKeyState(KeySpamS, "P") {
+    while KeyStillDown(KeySpamS) {
         if !IsScriptEnabledForContext()
             break
         Send "s"
@@ -732,7 +736,7 @@ HandleSpamA(*) {
     global KeySpamA, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    while GetKeyState(KeySpamA, "P") {
+    while KeyStillDown(KeySpamA) {
         if !IsScriptEnabledForContext()
             break
         Send "a"
@@ -767,7 +771,7 @@ HandleClick1(*) {
     }
     if released
         WaitMs(Click1_GapMs)
-    while GetKeyState(KeyClick1, "P") {
+    while KeyStillDown(KeyClick1) {
         Send btnDown
         if !WaitMsCancel(Click1_HoldMs, KeyClick1) {
             Send btnUp
@@ -797,7 +801,7 @@ HandleClick2(*) {
     }
     if released
         WaitMs(Click2_GapMs)
-    while GetKeyState(KeyClick2, "P") {
+    while KeyStillDown(KeyClick2) {
         Send btnDown
         if !WaitMsCancel(Click2_HoldMs, KeyClick2) {
             Send btnUp
@@ -827,7 +831,7 @@ HandleClick3(*) {
     }
     if released
         WaitMs(Click3_GapMs)
-    while GetKeyState(KeyClick3, "P") {
+    while KeyStillDown(KeyClick3) {
         Send btnDown
         if !WaitMsCancel(Click3_HoldMs, KeyClick3) {
             Send btnUp
