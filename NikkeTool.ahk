@@ -18,7 +18,6 @@ global AutoStartLink := A_Startup "\NikkeToolStarter.lnk"
 global LogFile := SettingsDir "\NikkeToolDebug.log"
 
 ; 延遲預設
-global EscDelayMs  := 220
 global Click1_HoldMs := 225
 global Click1_GapMs := 25
 global Click2_HoldMs := 240
@@ -31,7 +30,6 @@ global KeySpamDelayMs  := 34
 global KeySpamD      := "F13"
 global KeySpamS      := "F14"
 global KeySpamA      := "F15"
-global KeyEscDouble  := "F16"
 global KeyClick1 := "F17"
 global KeyClick2 := "F18"
 global KeyClick3 := "F19"
@@ -40,7 +38,6 @@ global KeyClick3 := "F19"
 global IsSpamDEnabled      := false
 global IsSpamSEnabled      := false
 global IsSpamAEnabled      := false
-global IsEscDoubleEnabled  := false
 global IsClick1Enabled := true
 global IsClick2Enabled := true
 global IsClick3Enabled := false
@@ -70,10 +67,10 @@ global HotkeyHealthTimerMs := 500
 
 ; GUI 控制項
 global MainGui
-global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1, EditKeyClick2, EditKeyClick3
-global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
-global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
-global LblEscDelay, LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
+global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3
+global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3
+global EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
+global LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
 global TxtStatus, ChkAutoStart, TxtNikkeStatus
 global ChkGlobalHotkeys
 global DelayCtrlMap := Map()
@@ -81,6 +78,9 @@ global FeatureCtrlMap := Map()
 global TxtClick1Info, TxtClick2Info, TxtClick3Info, TxtClick1Warn, TxtClick2Warn, TxtClick3Warn
 global Click1WarnPosX, Click1WarnPosY, Click2WarnPosX, Click2WarnPosY, Click3WarnPosX, Click3WarnPosY, WarnOffsetXPx
 global BtnClick1Side, BtnClick2Side, BtnClick3Side
+global KeyStateMap := Map()
+global HotkeyReleaseMap := Map()
+global KeyStateHook
 
 ; 綁定狀態
 global IsBinding := false
@@ -88,7 +88,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v1.09"
+global AppVersion := "v2.0"
 
 ; ============================================================
 ; 初始化
@@ -102,6 +102,7 @@ Init() {
 
     LoadSettings()
     ApplyAutoStart()
+    SetupKeyStateHook()
     UpdateAllHotkeys()
     LastForegroundState := (EnableGlobalHotkeys || IsNikkeForeground())
     ApplyContextState(LastForegroundState)
@@ -295,6 +296,7 @@ BusyWaitMs(ms) {
 
 BusyWaitMsCancel(ms, cancelKey) {
     global QPCFreq
+    global KeyStateMap
     InitQPC()
     if (QPCFreq = 0) {
         Sleep(ms)
@@ -306,7 +308,7 @@ BusyWaitMsCancel(ms, cancelKey) {
     timeoutTick := target + (QPCFreq * 10 // 1000)
     while true {
         Sleep(0)
-        if (cancelKey != "" && !GetKeyState(cancelKey, "P"))
+        if (cancelKey != "" && !IsKeyDown(cancelKey))
             return false
         DllCall("QueryPerformanceCounter", "Int64*", &now)
         loopCount += 1
@@ -326,9 +328,35 @@ BusyWaitMsCancel(ms, cancelKey) {
     return true
 }
 
-KeyStillDown(key) {
-    ; 物理或邏輯任一為按下即視為仍按住，減少漏判
-    return GetKeyState(key, "P") || GetKeyState(key)
+SetKeyStateFlag(key, isDown) {
+    global KeyStateMap
+    norm := NormalizeHotkeyName(key)
+    KeyStateMap[norm] := isDown ? true : false
+}
+
+IsKeyDown(key) {
+    global KeyStateMap
+    norm := NormalizeHotkeyName(key)
+    flag := KeyStateMap.Has(norm) ? KeyStateMap[norm] : false
+    ; 同時以 Hook 旗標與實體狀態為 true 才判定按下，降低誤判
+    return flag && GetKeyState(key, "P")
+}
+
+SetupKeyStateHook() {
+    global KeyStateHook
+    if IsSet(KeyStateHook)
+        return
+    ; 使用 InputHook 追蹤鍵盤按鍵的 down/up
+    KeyStateHook := InputHook("V")
+    KeyStateHook.OnKeyDown := (ih, vk, sc) => OnKeyStateChange(vk, sc, true)
+    KeyStateHook.OnKeyUp   := (ih, vk, sc) => OnKeyStateChange(vk, sc, false)
+    KeyStateHook.Start()
+}
+
+OnKeyStateChange(vk, sc, isDown) {
+    name := GetKeyName(Format("vk{:02X}sc{:03X}", vk, sc))
+    if (name != "")
+        SetKeyStateFlag(name, isDown)
 }
 
 WaitMs(ms) => BusyWaitMs(ms)
@@ -383,16 +411,15 @@ LogDebug(msg) {
 ; ============================================================
 LoadSettings() {
     global SettingsFile, AutoStartLink
-    global EscDelayMs, Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
     global ClickBtn1, ClickBtn2, ClickBtn3
     global AutoStartEnabled, EnableCursorLock, EnableGlobalHotkeys
 
     if !FileExist(SettingsFile)
         return
 
-    try EscDelayMs  := Integer(IniRead(SettingsFile, "Delays", "EscDelayMs",  EscDelayMs))
     try Click1_HoldMs := Integer(IniRead(SettingsFile, "Delays", "Click1_HoldMs", Click1_HoldMs))
     try Click1_GapMs := Integer(IniRead(SettingsFile, "Delays", "Click1_GapMs", Click1_GapMs))
     try Click2_HoldMs := Integer(IniRead(SettingsFile, "Delays", "Click2_HoldMs", Click2_HoldMs))
@@ -403,7 +430,6 @@ LoadSettings() {
     try KeySpamD      := IniRead(SettingsFile, "Keys", "DSpam",      KeySpamD)
     try KeySpamS      := IniRead(SettingsFile, "Keys", "SSpam",      KeySpamS)
     try KeySpamA      := IniRead(SettingsFile, "Keys", "ASpam",      KeySpamA)
-    try KeyEscDouble  := IniRead(SettingsFile, "Keys", "EscDouble",  KeyEscDouble)
     try KeyClick1 := IniRead(SettingsFile, "Keys", "ClickSeq1", KeyClick1)
     try KeyClick2 := IniRead(SettingsFile, "Keys", "ClickSeq2", KeyClick2)
     try KeyClick3 := IniRead(SettingsFile, "Keys", "ClickSeq3", KeyClick3)
@@ -415,7 +441,6 @@ LoadSettings() {
     try IsSpamDEnabled      := (Integer(IniRead(SettingsFile, "Enable", "DSpam",      IsSpamDEnabled      ? 1 : 0)) != 0)
     try IsSpamSEnabled      := (Integer(IniRead(SettingsFile, "Enable", "SSpam",      IsSpamSEnabled      ? 1 : 0)) != 0)
     try IsSpamAEnabled      := (Integer(IniRead(SettingsFile, "Enable", "ASpam",      IsSpamAEnabled      ? 1 : 0)) != 0)
-    try IsEscDoubleEnabled  := (Integer(IniRead(SettingsFile, "Enable", "EscDouble",  IsEscDoubleEnabled  ? 1 : 0)) != 0)
     try IsClick1Enabled := (Integer(IniRead(SettingsFile, "Enable", "ClickSeq1", IsClick1Enabled ? 1 : 0)) != 0)
     try IsClick2Enabled := (Integer(IniRead(SettingsFile, "Enable", "ClickSeq2", IsClick2Enabled ? 1 : 0)) != 0)
     try IsClick3Enabled := (Integer(IniRead(SettingsFile, "Enable", "ClickSeq3", IsClick3Enabled ? 1 : 0)) != 0)
@@ -427,13 +452,12 @@ LoadSettings() {
 
 SaveKeySettings() {
     global SettingsFile
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
     global AutoStartEnabled, EnableCursorLock, EnableGlobalHotkeys
-    global EscDelayMs, Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
+    global Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
     global ClickBtn1, ClickBtn2, ClickBtn3
 
-    IniWrite(EscDelayMs,  SettingsFile, "Delays", "EscDelayMs")
     IniWrite(Click1_HoldMs, SettingsFile, "Delays", "Click1_HoldMs")
     IniWrite(Click1_GapMs, SettingsFile, "Delays", "Click1_GapMs")
     IniWrite(Click2_HoldMs, SettingsFile, "Delays", "Click2_HoldMs")
@@ -444,7 +468,6 @@ SaveKeySettings() {
     IniWrite(KeySpamD,      SettingsFile, "Keys", "DSpam")
     IniWrite(KeySpamS,      SettingsFile, "Keys", "SSpam")
     IniWrite(KeySpamA,      SettingsFile, "Keys", "ASpam")
-    IniWrite(KeyEscDouble,  SettingsFile, "Keys", "EscDouble")
     IniWrite(KeyClick1, SettingsFile, "Keys", "ClickSeq1")
     IniWrite(KeyClick2, SettingsFile, "Keys", "ClickSeq2")
     IniWrite(KeyClick3, SettingsFile, "Keys", "ClickSeq3")
@@ -456,7 +479,6 @@ SaveKeySettings() {
     IniWrite(IsSpamDEnabled      ? 1 : 0, SettingsFile, "Enable", "DSpam")
     IniWrite(IsSpamSEnabled      ? 1 : 0, SettingsFile, "Enable", "SSpam")
     IniWrite(IsSpamAEnabled      ? 1 : 0, SettingsFile, "Enable", "ASpam")
-    IniWrite(IsEscDoubleEnabled  ? 1 : 0, SettingsFile, "Enable", "EscDouble")
     IniWrite(IsClick1Enabled ? 1 : 0, SettingsFile, "Enable", "ClickSeq1")
     IniWrite(IsClick2Enabled ? 1 : 0, SettingsFile, "Enable", "ClickSeq2")
     IniWrite(IsClick3Enabled ? 1 : 0, SettingsFile, "Enable", "ClickSeq3")
@@ -587,7 +609,7 @@ UpdateCpsVisibility() {
 
 UpdateFeatureRowState(id) {
     global FeatureCtrlMap
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
 
     if !FeatureCtrlMap.Has(id)
         return
@@ -597,7 +619,6 @@ UpdateFeatureRowState(id) {
         case "DSpam":      enabled := IsSpamDEnabled
         case "SSpam":      enabled := IsSpamSEnabled
         case "ASpam":      enabled := IsSpamAEnabled
-        case "EscDouble":  enabled := IsEscDoubleEnabled
         case "ClickSeq1":  enabled := IsClick1Enabled
         case "ClickSeq2":  enabled := IsClick2Enabled
         case "ClickSeq3":  enabled := IsClick3Enabled
@@ -625,26 +646,24 @@ ApplyFeatureRowStates() {
 ; 熱鍵綁定與狀態
 ; ============================================================
 UpdateAllHotkeys() {
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
     BindHotkey("DSpam",      KeySpamD,      HandleSpamD)
     BindHotkey("SSpam",      KeySpamS,      HandleSpamS)
     BindHotkey("ASpam",      KeySpamA,      HandleSpamA)
-    BindHotkey("EscDouble",  KeyEscDouble,  HandleEscDouble)
     BindHotkey("ClickSeq1", KeyClick1, HandleClick1)
     BindHotkey("ClickSeq2", KeyClick2, HandleClick2)
     BindHotkey("ClickSeq3", KeyClick3, HandleClick3)
 }
 
 BindHotkey(id, keyName, func) {
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
-    global HotkeyHandlerMap, HotkeyBaseKeyMap
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global HotkeyHandlerMap, HotkeyBaseKeyMap, HotkeyReleaseMap
 
     enabled := true
     switch id {
         case "DSpam":       enabled := IsSpamDEnabled
         case "SSpam":       enabled := IsSpamSEnabled
         case "ASpam":       enabled := IsSpamAEnabled
-        case "EscDouble":   enabled := IsEscDoubleEnabled
         case "ClickSeq1":  enabled := IsClick1Enabled
         case "ClickSeq2":  enabled := IsClick2Enabled
         case "ClickSeq3":  enabled := IsClick3Enabled
@@ -653,6 +672,7 @@ BindHotkey(id, keyName, func) {
     HotkeyHandlerMap[id] := func
     HotkeyBaseKeyMap[id] := (enabled && keyName != "") ? keyName : ""
     LogDebug("BindHotkey: " id " -> " (HotkeyBaseKeyMap[id] = "" ? "EMPTY" : HotkeyBaseKeyMap[id]) " (enabled=" enabled ")")
+    BindReleaseHotkey(id)
     ApplyHotkeyState(id, !IsScriptEnabledForContext())
 }
 
@@ -705,6 +725,43 @@ ApplyHotkeyState(id, passThrough) {
     }
 }
 
+BindReleaseHotkey(id) {
+    global HotkeyBaseKeyMap, HotkeyReleaseMap
+    base := HotkeyBaseKeyMap.Has(id) ? HotkeyBaseKeyMap[id] : ""
+    current := HotkeyReleaseMap.Has(id) ? HotkeyReleaseMap[id] : ""
+
+    if (base = "") {
+        if (current != "") {
+            try Hotkey(current, "Off")
+            HotkeyReleaseMap[id] := ""
+        }
+        return
+    }
+
+    normalized := NormalizeHotkeyName(base)
+    releaseHotkey := "*$" normalized " up"
+
+    if (current = releaseHotkey)
+        return
+
+    if (current != "") {
+        try Hotkey(current, "Off")
+        HotkeyReleaseMap[id] := ""
+    }
+
+    try {
+        Hotkey(releaseHotkey, (*) => OnHotkeyReleased(id, normalized), "On")
+        HotkeyReleaseMap[id] := releaseHotkey
+    } catch as e {
+        LogDebug("Release hotkey bind fail: id=" id " hotkey=" releaseHotkey " err=" e.Message)
+        HotkeyReleaseMap[id] := ""
+    }
+}
+
+OnHotkeyReleased(id, baseKey) {
+    SetKeyStateFlag(baseKey, false)
+}
+
 ; ============================================================
 ; 熱鍵行為
 ; ============================================================
@@ -712,11 +769,17 @@ HandleSpamD(*) {
     global KeySpamD, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    while KeyStillDown(KeySpamD) {
-        if !IsScriptEnabledForContext()
-            break
-        Send "d"
-        Sleep(KeySpamDelayMs)
+    SetKeyStateFlag(KeySpamD, true)
+    try {
+        while IsKeyDown(KeySpamD) {
+            if !IsScriptEnabledForContext()
+                break
+            Send "d"
+            Sleep(KeySpamDelayMs)
+        }
+    } finally {
+        ; 觸發鍵不再補 up，改由 Hook 狀態判斷
+        SetKeyStateFlag(KeySpamD, false)
     }
 }
 
@@ -724,11 +787,16 @@ HandleSpamS(*) {
     global KeySpamS, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    while KeyStillDown(KeySpamS) {
-        if !IsScriptEnabledForContext()
-            break
-        Send "s"
-        Sleep(KeySpamDelayMs)
+    SetKeyStateFlag(KeySpamS, true)
+    try {
+        while IsKeyDown(KeySpamS) {
+            if !IsScriptEnabledForContext()
+                break
+            Send "s"
+            Sleep(KeySpamDelayMs)
+        }
+    } finally {
+        SetKeyStateFlag(KeySpamS, false)
     }
 }
 
@@ -736,21 +804,17 @@ HandleSpamA(*) {
     global KeySpamA, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    while KeyStillDown(KeySpamA) {
-        if !IsScriptEnabledForContext()
-            break
-        Send "a"
-        Sleep(KeySpamDelayMs)
+    SetKeyStateFlag(KeySpamA, true)
+    try {
+        while IsKeyDown(KeySpamA) {
+            if !IsScriptEnabledForContext()
+                break
+            Send "a"
+            Sleep(KeySpamDelayMs)
+        }
+    } finally {
+        SetKeyStateFlag(KeySpamA, false)
     }
-}
-
-HandleEscDouble(*) {
-    global EscDelayMs, KeyEscDouble
-    if !IsScriptEnabledForContext()
-        return
-    Send "{Esc}"
-    Sleep(EscDelayMs)
-    Send "{Esc}"
 }
 
 HandleClick1(*) {
@@ -758,28 +822,31 @@ HandleClick1(*) {
     allowed := IsScriptEnabledForContext()
     if !allowed
         return
+    SetKeyStateFlag(KeyClick1, true)
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn1
     btnDown := "{" button " down}"
     btnUp   := "{" button " up}"
     released := false
     for eachButton in ["LButton", "RButton"] {
-        if GetKeyState(eachButton, "P") {
-            Send "{" eachButton " up}"
-            released := true
-        }
+        Send "{" eachButton " up}"
+        released := true
     }
     if released
         WaitMs(Click1_GapMs)
-    while KeyStillDown(KeyClick1) {
-        Send btnDown
-        if !WaitMsCancel(Click1_HoldMs, KeyClick1) {
+    try {
+        while IsKeyDown(KeyClick1) {
+            Send btnDown
+            if !WaitMsCancel(Click1_HoldMs, KeyClick1) {
+                break
+            }
             Send btnUp
-            break
+            if !WaitMsCancel(Click1_GapMs, KeyClick1)
+                break
         }
-        Send btnUp
-        if !WaitMsCancel(Click1_GapMs, KeyClick1)
-            break
+    } finally {
+        Send btnUp  ; 確保滑鼠按鍵鬆開
+        SetKeyStateFlag(KeyClick1, false)
     }
 }
 
@@ -788,28 +855,31 @@ HandleClick2(*) {
     allowed := IsScriptEnabledForContext()
     if !allowed
         return
+    SetKeyStateFlag(KeyClick2, true)
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn2
     btnDown := "{" button " down}"
     btnUp   := "{" button " up}"
     released := false
     for eachButton in ["LButton", "RButton"] {
-        if GetKeyState(eachButton, "P") {
-            Send "{" eachButton " up}"
-            released := true
-        }
+        Send "{" eachButton " up}"
+        released := true
     }
     if released
         WaitMs(Click2_GapMs)
-    while KeyStillDown(KeyClick2) {
-        Send btnDown
-        if !WaitMsCancel(Click2_HoldMs, KeyClick2) {
+    try {
+        while IsKeyDown(KeyClick2) {
+            Send btnDown
+            if !WaitMsCancel(Click2_HoldMs, KeyClick2) {
+                break
+            }
             Send btnUp
-            break
+            if !WaitMsCancel(Click2_GapMs, KeyClick2)
+                break
         }
-        Send btnUp
-        if !WaitMsCancel(Click2_GapMs, KeyClick2)
-            break
+    } finally {
+        Send btnUp  ; 確保滑鼠按鍵鬆開
+        SetKeyStateFlag(KeyClick2, false)
     }
 }
 
@@ -818,28 +888,31 @@ HandleClick3(*) {
     allowed := IsScriptEnabledForContext()
     if !allowed
         return
+    SetKeyStateFlag(KeyClick3, true)
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn3
     btnDown := "{" button " down}"
     btnUp   := "{" button " up}"
     released := false
     for eachButton in ["LButton", "RButton"] {
-        if GetKeyState(eachButton, "P") {
-            Send "{" eachButton " up}"
-            released := true
-        }
+        Send "{" eachButton " up}"
+        released := true
     }
     if released
         WaitMs(Click3_GapMs)
-    while KeyStillDown(KeyClick3) {
-        Send btnDown
-        if !WaitMsCancel(Click3_HoldMs, KeyClick3) {
+    try {
+        while IsKeyDown(KeyClick3) {
+            Send btnDown
+            if !WaitMsCancel(Click3_HoldMs, KeyClick3) {
+                break
+            }
             Send btnUp
-            break
+            if !WaitMsCancel(Click3_GapMs, KeyClick3)
+                break
         }
-        Send btnUp
-        if !WaitMsCancel(Click3_GapMs, KeyClick3)
-            break
+    } finally {
+        Send btnUp  ; 確保滑鼠按鍵鬆開
+        SetKeyStateFlag(KeyClick3, false)
     }
 }
 
@@ -847,7 +920,7 @@ HandleClick3(*) {
 ; 勾選事件與延遲顯示
 ; ============================================================
 SetFeatureEnabled(id, state) {
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
     global TxtStatus
 
     enabled := (state != 0)
@@ -855,7 +928,6 @@ SetFeatureEnabled(id, state) {
         case "DSpam":      IsSpamDEnabled      := enabled
         case "SSpam":      IsSpamSEnabled      := enabled
         case "ASpam":      IsSpamAEnabled      := enabled
-        case "EscDouble":  IsEscDoubleEnabled  := enabled
         case "ClickSeq1": IsClick1Enabled := enabled
         case "ClickSeq2": IsClick2Enabled := enabled
         case "ClickSeq3": IsClick3Enabled := enabled
@@ -872,12 +944,11 @@ SetFeatureEnabled(id, state) {
 
 SetDelayControlsEnabled() {
     global DelayCtrlMap
-    global IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
 
     for id, ctrls in DelayCtrlMap {
         visible := true
         switch id {
-            case "EscDouble":  visible := IsEscDoubleEnabled
             case "ClickSeq1": visible := IsClick1Enabled
             case "ClickSeq2": visible := IsClick2Enabled
             case "ClickSeq3": visible := IsClick3Enabled
@@ -898,13 +969,13 @@ SetDelayControlsEnabled() {
 ; 延遲套用與驗證
 ; ============================================================
 ApplyDelayConfig(*) {
-    global EscDelayMs, Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
-    global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
+    global Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
+    global EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
     global TxtStatus
 
-    mins := [200, 200, 17, 200, 17, 200, 17]
-    labels := ["ESC 延遲", "連點1 按壓時間", "連點1 休息間隔", "連點2 按壓時間", "連點2 休息間隔", "連點3 按壓時間", "連點3 休息間隔"]
-    inputs := [EditEscDelay.Value, EditClick1Hold.Value, EditClick1Gap.Value, EditClick2Hold.Value, EditClick2Gap.Value, EditClick3Hold.Value, EditClick3Gap.Value]
+    mins := [200, 17, 200, 17, 200, 17]
+    labels := ["連點1 按壓時間", "連點1 休息間隔", "連點2 按壓時間", "連點2 休息間隔", "連點3 按壓時間", "連點3 休息間隔"]
+    inputs := [EditClick1Hold.Value, EditClick1Gap.Value, EditClick2Hold.Value, EditClick2Gap.Value, EditClick3Hold.Value, EditClick3Gap.Value]
     parsed := []
 
     for idx, val in inputs {
@@ -922,13 +993,12 @@ ApplyDelayConfig(*) {
         parsed.Push(v)
     }
 
-    EscDelayMs  := parsed[1]
-    Click1_HoldMs := parsed[2]
-    Click1_GapMs := parsed[3]
-    Click2_HoldMs := parsed[4]
-    Click2_GapMs := parsed[5]
-    Click3_HoldMs := parsed[6]
-    Click3_GapMs := parsed[7]
+    Click1_HoldMs := parsed[1]
+    Click1_GapMs := parsed[2]
+    Click2_HoldMs := parsed[3]
+    Click2_GapMs := parsed[4]
+    Click3_HoldMs := parsed[5]
+    Click3_GapMs := parsed[6]
 
     SaveKeySettings()
     UpdateCpsInfo()
@@ -981,7 +1051,7 @@ WM_XBUTTONDOWN(wParam, *) {
 FinishBinding(newKey) {
     global IsBinding, BindingActionId, BindingDisplayCtrl, BindingInputHook
     global TxtStatus
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
 
     if !IsBinding
         return
@@ -998,7 +1068,6 @@ FinishBinding(newKey) {
         case "DSpam":      KeySpamD      := newKey
         case "SSpam":      KeySpamS      := newKey
         case "ASpam":      KeySpamA      := newKey
-        case "EscDouble":  KeyEscDouble  := newKey
         case "ClickSeq1": KeyClick1 := newKey
         case "ClickSeq2": KeyClick2 := newKey
         case "ClickSeq3": KeyClick3 := newKey
@@ -1049,10 +1118,10 @@ ImportSettings(*) {
 ; ============================================================
 BuildGui() {
     global MainGui, TxtStatus, ChkAutoStart
-    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1, EditKeyClick2, EditKeyClick3
-    global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
-    global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
-    global LblEscDelay, LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
+    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3
+    global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3
+    global EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
+    global LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
     global DelayCtrlMap, TxtClick1Info, TxtClick2Info, TxtClick3Info, TxtClick1Warn, TxtClick2Warn, TxtClick3Warn
     global Click1WarnPosX, Click1WarnPosY, Click2WarnPosX, Click2WarnPosY, Click3WarnPosX, Click3WarnPosY, WarnOffsetXPx
     global TxtNikkeStatus
@@ -1086,14 +1155,6 @@ BuildGui() {
     ChkSpamA := MainGui.Add("CheckBox", (IsSpamAEnabled ? "Checked " : "") "x+5 yp+5", "啟用")
     ChkSpamA.OnEvent("Click", (*) => SetFeatureEnabled("ASpam", ChkSpamA.Value))
     FeatureCtrlMap["ASpam"] := [lblA, EditKeySpamA, btnBindA]
-
-    lblEsc := MainGui.Add("Text", "xs yp+30", "ESC x2：")
-    EditKeyEscDouble := MainGui.Add("Edit", "x+23 w90 ReadOnly yp-5", KeyEscDouble)
-    btnBindEsc  := MainGui.Add("Button", "x+5 w80 yp-1", "變更")
-    btnBindEsc.OnEvent("Click", (*) => StartCaptureBinding("EscDouble", EditKeyEscDouble))
-    ChkEscDouble := MainGui.Add("CheckBox", (IsEscDoubleEnabled ? "Checked " : "") "x+5 yp+5", "啟用")
-    ChkEscDouble.OnEvent("Click", (*) => SetFeatureEnabled("EscDouble", ChkEscDouble.Value))
-    FeatureCtrlMap["EscDouble"] := [lblEsc, EditKeyEscDouble, btnBindEsc]
 
     MainGui.Add("Text", "xs yp+30 w380 h2 0x10", "")
 
@@ -1130,9 +1191,6 @@ BuildGui() {
     MainGui.Add("Text", "xs yp+40 w380 h2 0x10", "")
     MainGui.Add("Text", "xs yp+20", "延遲設定：")
 
-    LblEscDelay := MainGui.Add("Text", "xs yp+30", "ESC：兩次 ESC 中間延遲 (ms)")
-    EditEscDelay  := MainGui.Add("Edit", "w120", EscDelayMs)
-
     LblClick1Hold := MainGui.Add("Text", , "連點1：按壓時間 (ms)")
     EditClick1Hold  := MainGui.Add("Edit", "w120", Click1_HoldMs)
     LblClick1Gap := MainGui.Add("Text", , "連點1：休息間隔 (ms)")
@@ -1148,7 +1206,6 @@ BuildGui() {
     LblClick3Gap := MainGui.Add("Text", , "連點3：休息間隔 (ms)")
     EditClick3Gap  := MainGui.Add("Edit", "w120", Click3_GapMs)
 
-    DelayCtrlMap["EscDouble"]  := [LblEscDelay, EditEscDelay]
     DelayCtrlMap["ClickSeq1"] := [LblClick1Hold, EditClick1Hold, LblClick1Gap, EditClick1Gap]
     DelayCtrlMap["ClickSeq2"] := [LblClick2Hold, EditClick2Hold, LblClick2Gap, EditClick2Gap]
     DelayCtrlMap["ClickSeq3"] := [LblClick3Hold, EditClick3Hold, LblClick3Gap, EditClick3Gap]
@@ -1203,21 +1260,20 @@ BuildGui() {
 }
 
 RefreshUI() {
-    global KeySpamD, KeySpamS, KeySpamA, KeyEscDouble, KeyClick1, KeyClick2, KeyClick3
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsEscDoubleEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
-    global EscDelayMs, Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
     global AutoStartEnabled
     global BtnClick1Side, BtnClick2Side, BtnClick3Side
     global ClickBtn1, ClickBtn2, ClickBtn3
-    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyEscDouble, EditKeyClick1, EditKeyClick2, EditKeyClick3
-    global ChkSpamD, ChkSpamS, ChkSpamA, ChkEscDouble, ChkClick1, ChkClick2, ChkClick3
-    global EditEscDelay, EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
+    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3
+    global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3
+    global EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
     global ChkAutoStart, TxtStatus, EnableCursorLock, ChkGlobalHotkeys, EnableGlobalHotkeys
 
     EditKeySpamD.Value   := KeySpamD
     EditKeySpamS.Value   := KeySpamS
     EditKeySpamA.Value   := KeySpamA
-    EditKeyEscDouble.Value := KeyEscDouble
     EditKeyClick1.Value  := KeyClick1
     EditKeyClick2.Value  := KeyClick2
     EditKeyClick3.Value  := KeyClick3
@@ -1225,7 +1281,6 @@ RefreshUI() {
     ChkSpamD.Value   := IsSpamDEnabled      ? 1 : 0
     ChkSpamS.Value   := IsSpamSEnabled      ? 1 : 0
     ChkSpamA.Value   := IsSpamAEnabled      ? 1 : 0
-    ChkEscDouble.Value := IsEscDoubleEnabled  ? 1 : 0
     ChkClick1.Value  := IsClick1Enabled ? 1 : 0
     ChkClick2.Value  := IsClick2Enabled ? 1 : 0
     ChkClick3.Value  := IsClick3Enabled ? 1 : 0
@@ -1233,7 +1288,6 @@ RefreshUI() {
     SetClickButtonText(2, ClickBtn2)
     SetClickButtonText(3, ClickBtn3)
 
-    EditEscDelay.Value  := EscDelayMs
     EditClick1Hold.Value := Click1_HoldMs
     EditClick1Gap.Value := Click1_GapMs
     EditClick2Hold.Value := Click2_HoldMs
