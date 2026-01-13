@@ -81,6 +81,7 @@ global BtnClick1Side, BtnClick2Side, BtnClick3Side
 global KeyStateMap := Map()
 global HotkeyReleaseMap := Map()
 global KeyStateHook
+global HotkeyToken := Map()
 
 ; 綁定狀態
 global IsBinding := false
@@ -88,7 +89,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v2.0"
+global AppVersion := "v2.01"
 
 ; ============================================================
 ; 初始化
@@ -340,6 +341,18 @@ IsKeyDown(key) {
     flag := KeyStateMap.Has(norm) ? KeyStateMap[norm] : false
     ; 同時以 Hook 旗標與實體狀態為 true 才判定按下，降低誤判
     return flag && GetKeyState(key, "P")
+}
+
+StartHotkeyToken(id) {
+    global HotkeyToken
+    token := A_TickCount . "-" . Random(1, 1000000)
+    HotkeyToken[id] := token
+    return token
+}
+
+HasTokenChanged(id, token) {
+    global HotkeyToken
+    return !(HotkeyToken.Has(id) && HotkeyToken[id] = token)
 }
 
 SetupKeyStateHook() {
@@ -760,6 +773,8 @@ BindReleaseHotkey(id) {
 
 OnHotkeyReleased(id, baseKey) {
     SetKeyStateFlag(baseKey, false)
+    if (HotkeyToken.Has(id))
+        HotkeyToken[id] := ""
 }
 
 ; ============================================================
@@ -770,8 +785,11 @@ HandleSpamD(*) {
     if !IsScriptEnabledForContext()
         return
     SetKeyStateFlag(KeySpamD, true)
+    token := StartHotkeyToken("DSpam")
     try {
         while IsKeyDown(KeySpamD) {
+            if HasTokenChanged("DSpam", token)
+                break
             if !IsScriptEnabledForContext()
                 break
             Send "d"
@@ -780,6 +798,8 @@ HandleSpamD(*) {
     } finally {
         ; 觸發鍵不再補 up，改由 Hook 狀態判斷
         SetKeyStateFlag(KeySpamD, false)
+        if (HotkeyToken.Has("DSpam"))
+            HotkeyToken["DSpam"] := ""
     }
 }
 
@@ -788,8 +808,11 @@ HandleSpamS(*) {
     if !IsScriptEnabledForContext()
         return
     SetKeyStateFlag(KeySpamS, true)
+    token := StartHotkeyToken("SSpam")
     try {
         while IsKeyDown(KeySpamS) {
+            if HasTokenChanged("SSpam", token)
+                break
             if !IsScriptEnabledForContext()
                 break
             Send "s"
@@ -797,6 +820,8 @@ HandleSpamS(*) {
         }
     } finally {
         SetKeyStateFlag(KeySpamS, false)
+        if (HotkeyToken.Has("SSpam"))
+            HotkeyToken["SSpam"] := ""
     }
 }
 
@@ -805,8 +830,11 @@ HandleSpamA(*) {
     if !IsScriptEnabledForContext()
         return
     SetKeyStateFlag(KeySpamA, true)
+    token := StartHotkeyToken("ASpam")
     try {
         while IsKeyDown(KeySpamA) {
+            if HasTokenChanged("ASpam", token)
+                break
             if !IsScriptEnabledForContext()
                 break
             Send "a"
@@ -814,6 +842,8 @@ HandleSpamA(*) {
         }
     } finally {
         SetKeyStateFlag(KeySpamA, false)
+        if (HotkeyToken.Has("ASpam"))
+            HotkeyToken["ASpam"] := ""
     }
 }
 
@@ -823,6 +853,7 @@ HandleClick1(*) {
     if !allowed
         return
     SetKeyStateFlag(KeyClick1, true)
+    token := StartHotkeyToken("ClickSeq1")
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn1
     btnDown := "{" button " down}"
@@ -836,6 +867,8 @@ HandleClick1(*) {
         WaitMs(Click1_GapMs)
     try {
         while IsKeyDown(KeyClick1) {
+            if HasTokenChanged("ClickSeq1", token)
+                break
             Send btnDown
             if !WaitMsCancel(Click1_HoldMs, KeyClick1) {
                 break
@@ -847,6 +880,8 @@ HandleClick1(*) {
     } finally {
         Send btnUp  ; 確保滑鼠按鍵鬆開
         SetKeyStateFlag(KeyClick1, false)
+        if (HotkeyToken.Has("ClickSeq1"))
+            HotkeyToken["ClickSeq1"] := ""
     }
 }
 
@@ -856,6 +891,7 @@ HandleClick2(*) {
     if !allowed
         return
     SetKeyStateFlag(KeyClick2, true)
+    token := StartHotkeyToken("ClickSeq2")
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn2
     btnDown := "{" button " down}"
@@ -869,6 +905,8 @@ HandleClick2(*) {
         WaitMs(Click2_GapMs)
     try {
         while IsKeyDown(KeyClick2) {
+            if HasTokenChanged("ClickSeq2", token)
+                break
             Send btnDown
             if !WaitMsCancel(Click2_HoldMs, KeyClick2) {
                 break
@@ -880,6 +918,8 @@ HandleClick2(*) {
     } finally {
         Send btnUp  ; 確保滑鼠按鍵鬆開
         SetKeyStateFlag(KeyClick2, false)
+        if (HotkeyToken.Has("ClickSeq2"))
+            HotkeyToken["ClickSeq2"] := ""
     }
 }
 
@@ -889,6 +929,7 @@ HandleClick3(*) {
     if !allowed
         return
     SetKeyStateFlag(KeyClick3, true)
+    token := StartHotkeyToken("ClickSeq3")
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn3
     btnDown := "{" button " down}"
@@ -902,6 +943,8 @@ HandleClick3(*) {
         WaitMs(Click3_GapMs)
     try {
         while IsKeyDown(KeyClick3) {
+            if HasTokenChanged("ClickSeq3", token)
+                break
             Send btnDown
             if !WaitMsCancel(Click3_HoldMs, KeyClick3) {
                 break
@@ -913,6 +956,8 @@ HandleClick3(*) {
     } finally {
         Send btnUp  ; 確保滑鼠按鍵鬆開
         SetKeyStateFlag(KeyClick3, false)
+        if (HotkeyToken.Has("ClickSeq3"))
+            HotkeyToken["ClickSeq3"] := ""
     }
 }
 
