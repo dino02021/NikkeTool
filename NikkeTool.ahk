@@ -79,6 +79,7 @@ global TxtClick1Info, TxtClick2Info, TxtClick3Info, TxtClick1Warn, TxtClick2Warn
 global Click1WarnPosX, Click1WarnPosY, Click2WarnPosX, Click2WarnPosY, Click3WarnPosX, Click3WarnPosY, WarnOffsetXPx
 global BtnClick1Side, BtnClick2Side, BtnClick3Side
 global KeyStateMap := Map()
+global KeyBlockMap := Map()
 global HotkeyReleaseMap := Map()
 global KeyStateHook
 global HotkeyToken := Map()
@@ -89,7 +90,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v2.01"
+global AppVersion := "v2.1"
 
 ; ============================================================
 ; 初始化
@@ -315,32 +316,25 @@ BusyWaitMsCancel(ms, cancelKey) {
         loopCount += 1
         if (now >= target)
             break
-        if (now >= timeoutTick) {
-            elapsedMs := (now - start) * 1000 // QPCFreq
-            LogDebug("BusyWaitMsCancel timeout: ms=" ms " elapsed=" elapsedMs " loop=" loopCount)
-            return false
-        }
-        if (loopCount >= 1000000) {
-            elapsedMs := (now - start) * 1000 // QPCFreq
-            LogDebug("BusyWaitMsCancel loop limit: ms=" ms " elapsed=" elapsedMs " loop=" loopCount)
-            return false
-        }
     }
     return true
 }
 
 SetKeyStateFlag(key, isDown) {
-    global KeyStateMap
+    global KeyStateMap, KeyBlockMap
     norm := NormalizeHotkeyName(key)
     KeyStateMap[norm] := isDown ? true : false
+    ; 上一次收到 up 後，直到下一個 down 才允許進入迴圈
+    KeyBlockMap[norm] := isDown ? false : true
 }
 
 IsKeyDown(key) {
-    global KeyStateMap
+    global KeyStateMap, KeyBlockMap
     norm := NormalizeHotkeyName(key)
     flag := KeyStateMap.Has(norm) ? KeyStateMap[norm] : false
-    ; 同時以 Hook 旗標與實體狀態為 true 才判定按下，降低誤判
-    return flag && GetKeyState(key, "P")
+    blocked := KeyBlockMap.Has(norm) ? KeyBlockMap[norm] : false
+    ; Hook 旗標 + GetKeyState(P) 都為 true 且未被 Block 才算按下
+    return flag && GetKeyState(key, "P") && !blocked
 }
 
 StartHotkeyToken(id) {
@@ -353,6 +347,11 @@ StartHotkeyToken(id) {
 HasTokenChanged(id, token) {
     global HotkeyToken
     return !(HotkeyToken.Has(id) && HotkeyToken[id] = token)
+}
+
+ShouldKeepRunning(id, key, token) {
+    ; isKeyDown 為真且 token 未被更新時才繼續，任何 up 或新啟動都會跳出
+    return IsKeyDown(key) && !HasTokenChanged(id, token)
 }
 
 SetupKeyStateHook() {
@@ -787,9 +786,7 @@ HandleSpamD(*) {
     SetKeyStateFlag(KeySpamD, true)
     token := StartHotkeyToken("DSpam")
     try {
-        while IsKeyDown(KeySpamD) {
-            if HasTokenChanged("DSpam", token)
-                break
+        while ShouldKeepRunning("DSpam", KeySpamD, token) {
             if !IsScriptEnabledForContext()
                 break
             Send "d"
@@ -810,9 +807,7 @@ HandleSpamS(*) {
     SetKeyStateFlag(KeySpamS, true)
     token := StartHotkeyToken("SSpam")
     try {
-        while IsKeyDown(KeySpamS) {
-            if HasTokenChanged("SSpam", token)
-                break
+        while ShouldKeepRunning("SSpam", KeySpamS, token) {
             if !IsScriptEnabledForContext()
                 break
             Send "s"
@@ -832,9 +827,7 @@ HandleSpamA(*) {
     SetKeyStateFlag(KeySpamA, true)
     token := StartHotkeyToken("ASpam")
     try {
-        while IsKeyDown(KeySpamA) {
-            if HasTokenChanged("ASpam", token)
-                break
+        while ShouldKeepRunning("ASpam", KeySpamA, token) {
             if !IsScriptEnabledForContext()
                 break
             Send "a"
@@ -866,9 +859,7 @@ HandleClick1(*) {
     if released
         WaitMs(Click1_GapMs)
     try {
-        while IsKeyDown(KeyClick1) {
-            if HasTokenChanged("ClickSeq1", token)
-                break
+        while ShouldKeepRunning("ClickSeq1", KeyClick1, token) {
             Send btnDown
             if !WaitMsCancel(Click1_HoldMs, KeyClick1) {
                 break
@@ -904,9 +895,7 @@ HandleClick2(*) {
     if released
         WaitMs(Click2_GapMs)
     try {
-        while IsKeyDown(KeyClick2) {
-            if HasTokenChanged("ClickSeq2", token)
-                break
+        while ShouldKeepRunning("ClickSeq2", KeyClick2, token) {
             Send btnDown
             if !WaitMsCancel(Click2_HoldMs, KeyClick2) {
                 break
@@ -942,9 +931,7 @@ HandleClick3(*) {
     if released
         WaitMs(Click3_GapMs)
     try {
-        while IsKeyDown(KeyClick3) {
-            if HasTokenChanged("ClickSeq3", token)
-                break
+        while ShouldKeepRunning("ClickSeq3", KeyClick3, token) {
             Send btnDown
             if !WaitMsCancel(Click3_HoldMs, KeyClick3) {
                 break
