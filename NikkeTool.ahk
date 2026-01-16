@@ -1,5 +1,6 @@
 ﻿
 #Requires AutoHotkey v2.0
+#SingleInstance Off
 #UseHook  ; 強制鍵鼠熱鍵使用 hook，避免滑鼠鍵在送出點擊時讀不到實體狀態
 ; ============================================================
 ; 以系統管理員身分重新啟動
@@ -9,13 +10,14 @@ if !A_IsAdmin {
     ExitApp()
 }
 
+ClosePreviousInstance()
+
 ; ===================================================
 ; 全域設定與預設值
 ; ============================================================
 SettingsDir      := A_MyDocuments "\NikkeToolSettings"
 global SettingsFile := SettingsDir "\NikkeToolSettings.ini"
 global AutoStartLink := A_Startup "\NikkeToolStarter.lnk"
-global LogFile := SettingsDir "\NikkeToolDebug.log"
 
 ; 延遲預設
 global Click1_HoldMs := 225
@@ -33,6 +35,7 @@ global KeySpamA      := "F15"
 global KeyClick1 := "F17"
 global KeyClick2 := "F18"
 global KeyClick3 := "F19"
+global KeyPanic := "F20"
 
 ; 功能啟用
 global IsSpamDEnabled      := false
@@ -47,9 +50,11 @@ global ClickBtn3 := "LButton"
 
 ; 自動啟動
 global AutoStartEnabled := false
+global IsPanicEnabled := true
 
-; QPC
+; QPC (僅用於量測)
 global QPCFreq := 0
+
 
 ; 滑鼠鎖定
 global IsCursorLocked := false
@@ -61,16 +66,12 @@ global HotkeyCurrentMap := Map()
 global HotkeyHandlerMap := Map()
 global HotkeyBaseKeyMap := Map()
 global LastForegroundState := false
-global ContextDebounceTimerRunning := false
-global ContextDebounceDelayMs := 250
-global HotkeyHealthTimerMs := 500
 
 ; GUI 控制項
 global MainGui
-global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3
-global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3
+global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3, EditKeyPanic
+global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3, ChkPanic
 global EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
-global LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
 global TxtStatus, ChkAutoStart, TxtNikkeStatus
 global ChkGlobalHotkeys
 global DelayCtrlMap := Map()
@@ -79,10 +80,11 @@ global TxtClick1Info, TxtClick2Info, TxtClick3Info, TxtClick1Warn, TxtClick2Warn
 global Click1WarnPosX, Click1WarnPosY, Click2WarnPosX, Click2WarnPosY, Click3WarnPosX, Click3WarnPosY, WarnOffsetXPx
 global BtnClick1Side, BtnClick2Side, BtnClick3Side
 global KeyStateMap := Map()
-global KeyBlockMap := Map()
 global HotkeyReleaseMap := Map()
-global KeyStateHook
-global HotkeyToken := Map()
+global HotkeyStateMap := Map()
+global ActiveHotkeyOwner := ""
+global PendingHotkeyId := ""
+global PendingHotkeyKey := ""
 
 ; 綁定狀態
 global IsBinding := false
@@ -90,7 +92,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v2.1"
+global AppVersion := "v3.0"
 
 ; ============================================================
 ; 初始化
@@ -100,6 +102,8 @@ Init() {
     if !DirExist(SettingsDir) {
         DirCreate(SettingsDir)
     }
+    ok := DllCall("winmm\timeBeginPeriod", "UInt", 1)
+    LogEvent("SYS", "timeBeginPeriod", "init", "ok=" (ok = 0) " err=" A_LastError)
     ProcessSetPriority("AboveNormal")
 
     LoadSettings()
@@ -110,9 +114,23 @@ Init() {
     ApplyContextState(LastForegroundState)
     BuildGui()
     SetTimer(CursorLockTick, 200)
-    SetTimer(HotkeyHealthTick, HotkeyHealthTimerMs)
     OnExit(UnlockCursor)
     A_IconTip := "Nikke小工具 " AppVersion " - Yabi"
+}
+
+ClosePreviousInstance() {
+    DetectHiddenWindows true
+    for hwnd in WinGetList("ahk_class AutoHotkey") {
+        if (hwnd = A_ScriptHwnd)
+            continue
+        title := WinGetTitle("ahk_id " hwnd)
+        if (title = "")
+            continue
+        if InStr(title, A_ScriptFullPath) {
+            pid := WinGetPID("ahk_id " hwnd)
+            try ProcessClose(pid)
+        }
+    }
 }
 
 ; ============================================================
@@ -123,7 +141,7 @@ IsNikkeForeground() {
 }
 
 IsScriptEnabledForContext() {
-    return EnableGlobalHotkeys ? true : IsNikkeForeground()
+    return EnableGlobalHotkeys || IsNikkeForeground()
 }
 
 CursorLockTick(*) {
@@ -171,7 +189,7 @@ ToggleCursorLock(state) {
     global EnableCursorLock
     EnableCursorLock := (state != 0)
     SaveKeySettings()
-    LogDebug("ToggleCursorLock: " (EnableCursorLock ? "ON" : "OFF"))
+    LogEvent("SYS", "CursorLock", "toggle", "state=" (EnableCursorLock ? "ON" : "OFF"))
     if EnableCursorLock && IsNikkeForeground() {
         LockCursorToNikke()
     } else {
@@ -180,65 +198,23 @@ ToggleCursorLock(state) {
 }
 
 ToggleGlobalHotkeys(state) {
-    global EnableGlobalHotkeys, ContextDebounceTimerRunning
+    global EnableGlobalHotkeys
     EnableGlobalHotkeys := (state != 0)
     SaveKeySettings()
-    LogDebug("ToggleGlobalHotkeys: " (EnableGlobalHotkeys ? "ON" : "OFF"))
-    if EnableGlobalHotkeys {
-        ContextDebounceTimerRunning := false
-        SetTimer(ContextDebounceTick, 0)
-        ApplyContextState(true)
-    } else {
-        UpdateContextHotkeys()
-    }
-}
-
-HotkeyHealthTick(*) {
-    global HotkeyBaseKeyMap, HotkeyCurrentMap
-    for id, _ in HotkeyBaseKeyMap {
-        base := HotkeyBaseKeyMap[id]
-        current := HotkeyCurrentMap.Has(id) ? HotkeyCurrentMap[id] : ""
-        if (base != "" && current = "") {
-            LogDebug("HotkeyHealth: rebind " id " (base=" base ") current empty")
-            ApplyHotkeyState(id, !IsScriptEnabledForContext())
-        }
-    }
-}
-
-UpdateContextHotkeys() {
-    global LastForegroundState, ContextDebounceTimerRunning, ContextDebounceDelayMs, EnableGlobalHotkeys
-    wantActive := EnableGlobalHotkeys || IsNikkeForeground()
-    if (wantActive = LastForegroundState)
-        return
-
-    if wantActive {
-        ; 回到前景時立即開啟熱鍵，並取消任何待處理的關閉防抖
-        ContextDebounceTimerRunning := false
-        SetTimer(ContextDebounceTick, 0)
-        ApplyContextState(true)
-    } else {
-        ; 離開前景時啟動防抖，延後關閉熱鍵
-        if ContextDebounceTimerRunning
-            return
-        ContextDebounceTimerRunning := true
-        SetTimer(ContextDebounceTick, -ContextDebounceDelayMs)
-    }
-}
-
-ContextDebounceTick(*) {
-    global ContextDebounceTimerRunning
-    ContextDebounceTimerRunning := false
+    LogEvent("SYS", "GlobalHotkeys", "toggle", "state=" (EnableGlobalHotkeys ? "ON" : "OFF"))
     ApplyContextState(EnableGlobalHotkeys || IsNikkeForeground())
 }
 
 ApplyContextState(wantForeground) {
     global HotkeyBaseKeyMap, LastForegroundState
-    passThroughNeeded := !wantForeground
+    passThroughNeeded := !(EnableGlobalHotkeys || IsNikkeForeground())
     for id, _ in HotkeyBaseKeyMap {
+        if !passThroughNeeded
+            BindReleaseHotkey(id)
         ApplyHotkeyState(id, passThroughNeeded)
     }
     if (wantForeground != LastForegroundState) {
-        LogDebug("ApplyContextState: hotkeys " (wantForeground ? "ENABLED (fg/global)" : "DISABLED (bg)") )
+        LogEvent("CTX", "-", "hotkeys", (wantForeground ? "ENABLED (fg/global)" : "DISABLED (bg)"))
     }
     LastForegroundState := wantForeground
 }
@@ -255,107 +231,156 @@ UpdateNikkeStatus(*) {
         TxtNikkeStatus.Value := "尚未偵測到遊戲或是背景執行中 (nikke.exe)"
         TxtNikkeStatus.Opt("cRed")
     }
-    UpdateContextHotkeys()
+    ApplyContextState(EnableGlobalHotkeys || IsNikkeForeground())
 }
 
 ; ============================================================
-; 高精度計時
+; 計時等待
 ; ============================================================
+WaitMsg(ms) {
+    ; MsgWaitForMultipleObjectsEx 只等待 timeout，不等待任何 handle
+    DllCall("MsgWaitForMultipleObjectsEx", "UInt", 0, "Ptr", 0, "UInt", ms, "UInt", 0, "UInt", 0x00000004)
+}
+
+WaitMsCancel(ms, cancelKey) {
+    global QPCFreq
+    InitQPC()
+    if (QPCFreq = 0) {
+        Sleep(ms)
+        return true
+    }
+    start := QpcNow()
+    target := start + (QPCFreq * ms // 1000)
+    while true {
+        if (cancelKey != "" && !IsHookDown(cancelKey)) {
+            return false
+        }
+        now := QpcNow()
+        remainingMs := (target - now) * 1000 / QPCFreq
+        if (remainingMs <= 0)
+            break
+        if (remainingMs >= 16) {
+            WaitMsg(14)
+        } else if (remainingMs >= 2) {
+            WaitMsg(1)
+        } else
+            WaitMsg(0)
+    }
+    return true
+}
+
 InitQPC() {
     global QPCFreq
     if (QPCFreq = 0) {
         ok := DllCall("QueryPerformanceFrequency", "Int64*", &QPCFreq)
         if (!ok || QPCFreq = 0) {
-            MsgBox("QueryPerformanceFrequency 失敗，QPCFreq = " QPCFreq)
+            LogEvent("SYS", "QPC", "initFail", "freq=" QPCFreq)
         }
     }
 }
 
-BusyWaitMs(ms) {
+QpcNow() {
     global QPCFreq
     InitQPC()
-    if (QPCFreq = 0) {
-        Sleep(ms)
-        return
-    }
-    start := 0, now := 0, loopCount := 0
-    DllCall("QueryPerformanceCounter", "Int64*", &start)
-    target := start + (QPCFreq * ms // 1000)
-    timeoutTick := target + (QPCFreq * 10 // 1000)  ; 目標再多給 10ms 緩衝
-    while true {
-        DllCall("QueryPerformanceCounter", "Int64*", &now)
-        Sleep(0)
-        loopCount += 1
-        if (now >= target)
-            break
-        if (now >= timeoutTick) {
-            elapsedMs := (now - start) * 1000 // QPCFreq
-            LogDebug("BusyWaitMs timeout: ms=" ms " elapsed=" elapsedMs " loop=" loopCount)
-            break
-        }
-    }
+    now := 0
+    DllCall("QueryPerformanceCounter", "Int64*", &now)
+    return now
 }
 
-BusyWaitMsCancel(ms, cancelKey) {
+QpcDiffMs(start, now) {
     global QPCFreq
+    if (QPCFreq = 0)
+        return 0
+    return (now - start) * 1000 / QPCFreq
+}
+
+SetHookStateFlag(key, isDown) {
     global KeyStateMap
-    InitQPC()
-    if (QPCFreq = 0) {
-        Sleep(ms)
+    norm := NormalizeHotkeyName(key)
+    KeyStateMap[norm] := isDown ? true : false
+}
+
+IsHookDown(key) {
+    global KeyStateMap
+    norm := NormalizeHotkeyName(key)
+    flagHook := KeyStateMap.Has(norm) ? KeyStateMap[norm] : false
+    return flagHook
+}
+
+ShouldKeepRunning(id, key) {
+    ; isKeyDown 為真且 token 未被更新時才繼續，任何 up 或新啟動都會跳出
+    reasons := ""
+    if (HotkeyStateMap.Has(id) && !HotkeyStateMap[id])
+        reasons .= "hotkeyUp,"
+    if !GetKeyState(key, "P")
+        reasons .= "physicalUp,"
+    if !IsHookDown(key)
+        reasons .= "keyUp,"
+    if (reasons != "") {
+        LogEvent("RUN", id, "stop", "reason=" RTrim(reasons, ",") " key=" key)
         return false
-    }
-    start := 0, now := 0, loopCount := 0
-    DllCall("QueryPerformanceCounter", "Int64*", &start)
-    target := start + (QPCFreq * ms // 1000)
-    timeoutTick := target + (QPCFreq * 10 // 1000)
-    while true {
-        Sleep(0)
-        if (cancelKey != "" && !IsKeyDown(cancelKey))
-            return false
-        DllCall("QueryPerformanceCounter", "Int64*", &now)
-        loopCount += 1
-        if (now >= target)
-            break
     }
     return true
 }
 
-SetKeyStateFlag(key, isDown) {
-    global KeyStateMap, KeyBlockMap
-    norm := NormalizeHotkeyName(key)
-    KeyStateMap[norm] := isDown ? true : false
-    ; 上一次收到 up 後，直到下一個 down 才允許進入迴圈
-    KeyBlockMap[norm] := isDown ? false : true
+
+AcquireHotkeyOwner(id, key) {
+    global ActiveHotkeyOwner, PendingHotkeyId, PendingHotkeyKey
+    if (ActiveHotkeyOwner = "" || ActiveHotkeyOwner = id) {
+        ActiveHotkeyOwner := id
+        LogEvent("OWNER", id, "acquire")
+        return true
+    }
+    static lastOwnerQueueLog := 0
+    PendingHotkeyId := id
+    PendingHotkeyKey := key
+    if (A_TickCount - lastOwnerQueueLog >= 1000) {
+        LogEvent("OWNER", id, "queue", "owner=" ActiveHotkeyOwner)
+        lastOwnerQueueLog := A_TickCount
+    }
+    return false
 }
 
-IsKeyDown(key) {
-    global KeyStateMap, KeyBlockMap
-    norm := NormalizeHotkeyName(key)
-    flag := KeyStateMap.Has(norm) ? KeyStateMap[norm] : false
-    blocked := KeyBlockMap.Has(norm) ? KeyBlockMap[norm] : false
-    ; Hook 旗標 + GetKeyState(P) 都為 true 且未被 Block 才算按下
-    return flag && GetKeyState(key, "P") && !blocked
+ReleaseHotkeyOwner(id) {
+    global ActiveHotkeyOwner
+    if (ActiveHotkeyOwner = id)
+        ActiveHotkeyOwner := ""
+    LogEvent("OWNER", id, "release")
+    TryStartPendingHotkey()
 }
 
-StartHotkeyToken(id) {
-    global HotkeyToken
-    token := A_TickCount . "-" . Random(1, 1000000)
-    HotkeyToken[id] := token
-    return token
+TryStartPendingHotkey() {
+    global PendingHotkeyId, PendingHotkeyKey, HotkeyHandlerMap
+    if (PendingHotkeyId = "")
+        return
+    id := PendingHotkeyId
+    key := PendingHotkeyKey
+    PendingHotkeyId := ""
+    PendingHotkeyKey := ""
+    if (key != "" && IsHookDown(key)) {
+        LogEvent("OWNER", id, "startPending")
+        if (HotkeyHandlerMap.Has(id)) {
+            func := HotkeyHandlerMap[id]
+            SetTimer((*) => func.Call(), -1)
+        }
+    } else {
+        LogEvent("OWNER", id, "dropPending")
+    }
 }
 
-HasTokenChanged(id, token) {
-    global HotkeyToken
-    return !(HotkeyToken.Has(id) && HotkeyToken[id] = token)
-}
-
-ShouldKeepRunning(id, key, token) {
-    ; isKeyDown 為真且 token 未被更新時才繼續，任何 up 或新啟動都會跳出
-    return IsKeyDown(key) && !HasTokenChanged(id, token)
+EnsureOwnerAlive() {
+    global ActiveHotkeyOwner
+    if (ActiveHotkeyOwner = "")
+        return
+    ownerKey := GetTriggerKey(ActiveHotkeyOwner)
+    if (ownerKey = "" || !IsHookDown(ownerKey)) {
+        LogEvent("OWNER", ActiveHotkeyOwner, "cleared")
+        ActiveHotkeyOwner := ""
+    }
 }
 
 SetupKeyStateHook() {
-    global KeyStateHook
+    static KeyStateHook
     if IsSet(KeyStateHook)
         return
     ; 使用 InputHook 追蹤鍵盤按鍵的 down/up
@@ -365,14 +390,48 @@ SetupKeyStateHook() {
     KeyStateHook.Start()
 }
 
+
 OnKeyStateChange(vk, sc, isDown) {
+    global ActiveHotkeyOwner, HotkeyStateMap
     name := GetKeyName(Format("vk{:02X}sc{:03X}", vk, sc))
-    if (name != "")
-        SetKeyStateFlag(name, isDown)
+    if (name = "")
+        name := GetKeyName(Format("sc{:03X}", sc))
+    if (name = "")
+        return
+    LogEvent("HOOK", name, (isDown ? "down" : "up"), "vk=" vk " sc=" sc)
+    if (!isDown) {
+        owner := ActiveHotkeyOwner
+        if (owner != "" && HotkeyStateMap.Has(owner) && HotkeyStateMap[owner]) {
+            ownerKey := GetTriggerKey(owner)
+            if (ownerKey != "" && NormalizeHotkeyName(ownerKey) = NormalizeHotkeyName(name)) {
+                HotkeyStateMap[owner] := false
+                LogEvent("HOOK", owner, "fallbackUp", "key=" name)
+            }
+        }
+    }
+    SetHookStateFlag(name, isDown)
 }
 
-WaitMs(ms) => BusyWaitMs(ms)
-WaitMsCancel(ms, cancelKey) => BusyWaitMsCancel(ms, cancelKey)
+GetTriggerKey(id) {
+    global HotkeyBaseKeyMap, HotkeyCurrentMap
+    if HotkeyBaseKeyMap.Has(id) && (HotkeyBaseKeyMap[id] != "")
+        return HotkeyBaseKeyMap[id]
+    if HotkeyCurrentMap.Has(id)
+        return HotkeyCurrentMap[id]
+    return ""
+}
+
+ForcePreemptOthers(currentId) {
+    for _, id in ["DSpam", "SSpam", "ASpam", "ClickSeq1", "ClickSeq2", "ClickSeq3"] {
+        if (id = currentId)
+            continue
+        key := GetTriggerKey(id)
+        if (key != "") {
+            Send "{" key " up}"
+            SetHookStateFlag(key, false)
+        }
+    }
+}
 
 GetClickButtonLabel(btn) {
     return (btn = "RButton") ? "✓ 右鍵" : "✓ 左鍵"
@@ -412,8 +471,15 @@ ToggleClickSide(seq) {
     SaveKeySettings()
 }
 
+LogEvent(category, id, action, detail := "") {
+    msg := "LOG | " category " | " id " | " action
+    if (detail != "")
+        msg .= " | " detail
+    LogDebug(msg)
+}
+
 LogDebug(msg) {
-    global LogFile
+    static LogFile := SettingsDir "\NikkeToolDebug.log"
     ts := FormatTime(, "yyyy-MM-dd HH:mm:ss")
     try FileAppend(ts " - " msg "`n", LogFile, "UTF-8")
 }
@@ -424,8 +490,8 @@ LogDebug(msg) {
 LoadSettings() {
     global SettingsFile, AutoStartLink
     global Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
-    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3, KeyPanic
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled, IsPanicEnabled
     global ClickBtn1, ClickBtn2, ClickBtn3
     global AutoStartEnabled, EnableCursorLock, EnableGlobalHotkeys
 
@@ -445,6 +511,7 @@ LoadSettings() {
     try KeyClick1 := IniRead(SettingsFile, "Keys", "ClickSeq1", KeyClick1)
     try KeyClick2 := IniRead(SettingsFile, "Keys", "ClickSeq2", KeyClick2)
     try KeyClick3 := IniRead(SettingsFile, "Keys", "ClickSeq3", KeyClick3)
+    try KeyPanic := IniRead(SettingsFile, "Keys", "Panic", KeyPanic)
 
     try ClickBtn1 := IniRead(SettingsFile, "Buttons", "ClickSeq1_Button", ClickBtn1)
     try ClickBtn2 := IniRead(SettingsFile, "Buttons", "ClickSeq2_Button", ClickBtn2)
@@ -456,6 +523,7 @@ LoadSettings() {
     try IsClick1Enabled := (Integer(IniRead(SettingsFile, "Enable", "ClickSeq1", IsClick1Enabled ? 1 : 0)) != 0)
     try IsClick2Enabled := (Integer(IniRead(SettingsFile, "Enable", "ClickSeq2", IsClick2Enabled ? 1 : 0)) != 0)
     try IsClick3Enabled := (Integer(IniRead(SettingsFile, "Enable", "ClickSeq3", IsClick3Enabled ? 1 : 0)) != 0)
+    try IsPanicEnabled := (Integer(IniRead(SettingsFile, "Enable", "Panic", IsPanicEnabled ? 1 : 0)) != 0)
 
     try AutoStartEnabled := (Integer(IniRead(SettingsFile, "General", "AutoStart", FileExist(AutoStartLink) ? 1 : 0)) != 0)
     try EnableCursorLock := (Integer(IniRead(SettingsFile, "General", "CursorLock", EnableCursorLock ? 1 : 0)) != 0)
@@ -464,8 +532,8 @@ LoadSettings() {
 
 SaveKeySettings() {
     global SettingsFile
-    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3, KeyPanic
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled, IsPanicEnabled
     global AutoStartEnabled, EnableCursorLock, EnableGlobalHotkeys
     global Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
     global ClickBtn1, ClickBtn2, ClickBtn3
@@ -483,6 +551,7 @@ SaveKeySettings() {
     IniWrite(KeyClick1, SettingsFile, "Keys", "ClickSeq1")
     IniWrite(KeyClick2, SettingsFile, "Keys", "ClickSeq2")
     IniWrite(KeyClick3, SettingsFile, "Keys", "ClickSeq3")
+    IniWrite(KeyPanic, SettingsFile, "Keys", "Panic")
 
     IniWrite(ClickBtn1, SettingsFile, "Buttons", "ClickSeq1_Button")
     IniWrite(ClickBtn2, SettingsFile, "Buttons", "ClickSeq2_Button")
@@ -494,6 +563,7 @@ SaveKeySettings() {
     IniWrite(IsClick1Enabled ? 1 : 0, SettingsFile, "Enable", "ClickSeq1")
     IniWrite(IsClick2Enabled ? 1 : 0, SettingsFile, "Enable", "ClickSeq2")
     IniWrite(IsClick3Enabled ? 1 : 0, SettingsFile, "Enable", "ClickSeq3")
+    IniWrite(IsPanicEnabled ? 1 : 0, SettingsFile, "Enable", "Panic")
 
     IniWrite(AutoStartEnabled ? 1 : 0, SettingsFile, "General", "AutoStart")
     IniWrite(EnableCursorLock ? 1 : 0, SettingsFile, "General", "CursorLock")
@@ -621,7 +691,7 @@ UpdateCpsVisibility() {
 
 UpdateFeatureRowState(id) {
     global FeatureCtrlMap
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled, IsPanicEnabled
 
     if !FeatureCtrlMap.Has(id)
         return
@@ -634,6 +704,7 @@ UpdateFeatureRowState(id) {
         case "ClickSeq1":  enabled := IsClick1Enabled
         case "ClickSeq2":  enabled := IsClick2Enabled
         case "ClickSeq3":  enabled := IsClick3Enabled
+        case "Panic":      enabled := IsPanicEnabled
     }
 
     for _, ctrl in FeatureCtrlMap[id] {
@@ -658,17 +729,18 @@ ApplyFeatureRowStates() {
 ; 熱鍵綁定與狀態
 ; ============================================================
 UpdateAllHotkeys() {
-    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3, KeyPanic
     BindHotkey("DSpam",      KeySpamD,      HandleSpamD)
     BindHotkey("SSpam",      KeySpamS,      HandleSpamS)
     BindHotkey("ASpam",      KeySpamA,      HandleSpamA)
     BindHotkey("ClickSeq1", KeyClick1, HandleClick1)
     BindHotkey("ClickSeq2", KeyClick2, HandleClick2)
     BindHotkey("ClickSeq3", KeyClick3, HandleClick3)
+    BindHotkey("Panic", KeyPanic, HandlePanic)
 }
 
 BindHotkey(id, keyName, func) {
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsPanicEnabled
     global HotkeyHandlerMap, HotkeyBaseKeyMap, HotkeyReleaseMap
 
     enabled := true
@@ -679,11 +751,12 @@ BindHotkey(id, keyName, func) {
         case "ClickSeq1":  enabled := IsClick1Enabled
         case "ClickSeq2":  enabled := IsClick2Enabled
         case "ClickSeq3":  enabled := IsClick3Enabled
+        case "Panic":      enabled := IsPanicEnabled
     }
 
     HotkeyHandlerMap[id] := func
     HotkeyBaseKeyMap[id] := (enabled && keyName != "") ? keyName : ""
-    LogDebug("BindHotkey: " id " -> " (HotkeyBaseKeyMap[id] = "" ? "EMPTY" : HotkeyBaseKeyMap[id]) " (enabled=" enabled ")")
+    LogEvent("HOTKEY", id, "bind", "key=" (HotkeyBaseKeyMap[id] = "" ? "EMPTY" : HotkeyBaseKeyMap[id]) " enabled=" enabled)
     BindReleaseHotkey(id)
     ApplyHotkeyState(id, !IsScriptEnabledForContext())
 }
@@ -695,7 +768,7 @@ NormalizeHotkeyName(name) {
 }
 
 ApplyHotkeyState(id, passThrough) {
-    global HotkeyBaseKeyMap, HotkeyHandlerMap, HotkeyCurrentMap
+    global HotkeyBaseKeyMap, HotkeyHandlerMap, HotkeyCurrentMap, HotkeyReleaseMap
 
     base := HotkeyBaseKeyMap.Has(id) ? HotkeyBaseKeyMap[id] : ""
     handler := HotkeyHandlerMap.Has(id) ? HotkeyHandlerMap[id] : ""
@@ -705,6 +778,19 @@ ApplyHotkeyState(id, passThrough) {
         if (current != "") {
             try Hotkey(current, "Off")
             HotkeyCurrentMap[id] := ""
+        }
+        return
+    }
+
+    if passThrough {
+        if (current != "") {
+            try Hotkey(current, "Off")
+            HotkeyCurrentMap[id] := ""
+        }
+        release := HotkeyReleaseMap.Has(id) ? HotkeyReleaseMap[id] : ""
+        if (release != "") {
+            try Hotkey(release, "Off")
+            HotkeyReleaseMap[id] := ""
         }
         return
     }
@@ -724,7 +810,7 @@ ApplyHotkeyState(id, passThrough) {
     if (current != "") {
         try Hotkey(current, "Off")
         catch as e {
-            LogDebug("Hotkey off fail: id=" id " hotkey=" current " err=" e.Message)
+            LogEvent("HOTKEY", id, "offFail", "hotkey=" current " err=" e.Message)
         }
     }
 
@@ -732,7 +818,7 @@ ApplyHotkeyState(id, passThrough) {
         Hotkey(newHotkey, handler, "On")
         HotkeyCurrentMap[id] := newHotkey
     } catch as e {
-        LogDebug("Hotkey on fail: id=" id " hotkey=" newHotkey " err=" e.Message)
+        LogEvent("HOTKEY", id, "onFail", "hotkey=" newHotkey " err=" e.Message)
         HotkeyCurrentMap[id] := ""
     }
 }
@@ -765,15 +851,42 @@ BindReleaseHotkey(id) {
         Hotkey(releaseHotkey, (*) => OnHotkeyReleased(id, normalized), "On")
         HotkeyReleaseMap[id] := releaseHotkey
     } catch as e {
-        LogDebug("Release hotkey bind fail: id=" id " hotkey=" releaseHotkey " err=" e.Message)
+        LogEvent("HOTKEY", id, "releaseBindFail", "hotkey=" releaseHotkey " err=" e.Message)
         HotkeyReleaseMap[id] := ""
     }
 }
 
 OnHotkeyReleased(id, baseKey) {
-    SetKeyStateFlag(baseKey, false)
-    if (HotkeyToken.Has(id))
-        HotkeyToken[id] := ""
+    LogEvent("HOTKEY", id, "up", "key=" baseKey)
+    if (id = "DSpam" || id = "SSpam" || id = "ASpam") {
+        HotkeyStateMap[id] := false
+        SetHookStateFlag(baseKey, false)
+        return
+    }
+    if (id = "ClickSeq1" || id = "ClickSeq2" || id = "ClickSeq3") {
+        HotkeyStateMap[id] := false
+    }
+    SetHookStateFlag(baseKey, false)
+}
+
+HandlePanic(*) {
+    global ActiveHotkeyOwner, PendingHotkeyId, PendingHotkeyKey, HotkeyStateMap
+    LogEvent("PANIC", "-", "trigger")
+    ActiveHotkeyOwner := ""
+    PendingHotkeyId := ""
+    PendingHotkeyKey := ""
+
+    for id in ["DSpam", "SSpam", "ASpam", "ClickSeq1", "ClickSeq2", "ClickSeq3"] {
+        HotkeyStateMap[id] := false
+        key := GetTriggerKey(id)
+        if (key != "") {
+            Send "{" key " up}"
+            SetHookStateFlag(key, false)
+        }
+    }
+    for btn in ["LButton", "RButton", "MButton", "XButton1", "XButton2"] {
+        Send "{" btn " up}"
+    }
 }
 
 ; ============================================================
@@ -783,20 +896,29 @@ HandleSpamD(*) {
     global KeySpamD, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    SetKeyStateFlag(KeySpamD, true)
-    token := StartHotkeyToken("DSpam")
+    HotkeyStateMap["DSpam"] := true
+    SetHookStateFlag(KeySpamD, true)
+    if !AcquireHotkeyOwner("DSpam", KeySpamD)
+        return
+    if !IsHookDown(KeySpamD) {
+        ReleaseHotkeyOwner("DSpam")
+        return
+    }
     try {
-        while ShouldKeepRunning("DSpam", KeySpamD, token) {
-            if !IsScriptEnabledForContext()
+        while ShouldKeepRunning("DSpam", KeySpamD) {
+            if !IsScriptEnabledForContext() {
+                LogEvent("RUN", "DSpam", "stop", "reason=context")
                 break
+            }
             Send "d"
-            Sleep(KeySpamDelayMs)
+            if !WaitMsCancel(KeySpamDelayMs, KeySpamD) {
+                break
+            }
         }
     } finally {
         ; 觸發鍵不再補 up，改由 Hook 狀態判斷
-        SetKeyStateFlag(KeySpamD, false)
-        if (HotkeyToken.Has("DSpam"))
-            HotkeyToken["DSpam"] := ""
+        SetHookStateFlag(KeySpamD, false)
+        ReleaseHotkeyOwner("DSpam")
     }
 }
 
@@ -804,19 +926,28 @@ HandleSpamS(*) {
     global KeySpamS, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    SetKeyStateFlag(KeySpamS, true)
-    token := StartHotkeyToken("SSpam")
+    HotkeyStateMap["SSpam"] := true
+    SetHookStateFlag(KeySpamS, true)
+    if !AcquireHotkeyOwner("SSpam", KeySpamS)
+        return
+    if !IsHookDown(KeySpamS) {
+        ReleaseHotkeyOwner("SSpam")
+        return
+    }
     try {
-        while ShouldKeepRunning("SSpam", KeySpamS, token) {
-            if !IsScriptEnabledForContext()
+        while ShouldKeepRunning("SSpam", KeySpamS) {
+            if !IsScriptEnabledForContext() {
+                LogEvent("RUN", "SSpam", "stop", "reason=context")
                 break
+            }
             Send "s"
-            Sleep(KeySpamDelayMs)
+            if !WaitMsCancel(KeySpamDelayMs, KeySpamS) {
+                break
+            }
         }
     } finally {
-        SetKeyStateFlag(KeySpamS, false)
-        if (HotkeyToken.Has("SSpam"))
-            HotkeyToken["SSpam"] := ""
+        SetHookStateFlag(KeySpamS, false)
+        ReleaseHotkeyOwner("SSpam")
     }
 }
 
@@ -824,19 +955,28 @@ HandleSpamA(*) {
     global KeySpamA, KeySpamDelayMs
     if !IsScriptEnabledForContext()
         return
-    SetKeyStateFlag(KeySpamA, true)
-    token := StartHotkeyToken("ASpam")
+    HotkeyStateMap["ASpam"] := true
+    SetHookStateFlag(KeySpamA, true)
+    if !AcquireHotkeyOwner("ASpam", KeySpamA)
+        return
+    if !IsHookDown(KeySpamA) {
+        ReleaseHotkeyOwner("ASpam")
+        return
+    }
     try {
-        while ShouldKeepRunning("ASpam", KeySpamA, token) {
-            if !IsScriptEnabledForContext()
+        while ShouldKeepRunning("ASpam", KeySpamA) {
+            if !IsScriptEnabledForContext() {
+                LogEvent("RUN", "ASpam", "stop", "reason=context")
                 break
+            }
             Send "a"
-            Sleep(KeySpamDelayMs)
+            if !WaitMsCancel(KeySpamDelayMs, KeySpamA) {
+                break
+            }
         }
     } finally {
-        SetKeyStateFlag(KeySpamA, false)
-        if (HotkeyToken.Has("ASpam"))
-            HotkeyToken["ASpam"] := ""
+        SetHookStateFlag(KeySpamA, false)
+        ReleaseHotkeyOwner("ASpam")
     }
 }
 
@@ -845,8 +985,14 @@ HandleClick1(*) {
     allowed := IsScriptEnabledForContext()
     if !allowed
         return
-    SetKeyStateFlag(KeyClick1, true)
-    token := StartHotkeyToken("ClickSeq1")
+    HotkeyStateMap["ClickSeq1"] := true
+    SetHookStateFlag(KeyClick1, true)
+    if !AcquireHotkeyOwner("ClickSeq1", KeyClick1)
+        return
+    if !IsHookDown(KeyClick1) {
+        ReleaseHotkeyOwner("ClickSeq1")
+        return
+    }
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn1
     btnDown := "{" button " down}"
@@ -856,23 +1002,32 @@ HandleClick1(*) {
         Send "{" eachButton " up}"
         released := true
     }
-    if released
-        WaitMs(Click1_GapMs)
+    if released {
+        WaitMsCancel(Click1_GapMs, KeyClick1)
+    }
     try {
-        while ShouldKeepRunning("ClickSeq1", KeyClick1, token) {
+        while ShouldKeepRunning("ClickSeq1", KeyClick1) {
+            if !IsScriptEnabledForContext() {
+                LogEvent("RUN", "ClickSeq1", "stop", "reason=context")
+                break
+            }
             Send btnDown
-            if !WaitMsCancel(Click1_HoldMs, KeyClick1) {
+            holdStart := QpcNow()
+            holdOk := WaitMsCancel(Click1_HoldMs, KeyClick1)
+            if !holdOk {
                 break
             }
             Send btnUp
-            if !WaitMsCancel(Click1_GapMs, KeyClick1)
+            gapStart := QpcNow()
+            gapOk := WaitMsCancel(Click1_GapMs, KeyClick1)
+            if !gapOk
                 break
         }
     } finally {
         Send btnUp  ; 確保滑鼠按鍵鬆開
-        SetKeyStateFlag(KeyClick1, false)
-        if (HotkeyToken.Has("ClickSeq1"))
-            HotkeyToken["ClickSeq1"] := ""
+        HotkeyStateMap["ClickSeq1"] := false
+        SetHookStateFlag(KeyClick1, false)
+        ReleaseHotkeyOwner("ClickSeq1")
     }
 }
 
@@ -881,8 +1036,14 @@ HandleClick2(*) {
     allowed := IsScriptEnabledForContext()
     if !allowed
         return
-    SetKeyStateFlag(KeyClick2, true)
-    token := StartHotkeyToken("ClickSeq2")
+    HotkeyStateMap["ClickSeq2"] := true
+    SetHookStateFlag(KeyClick2, true)
+    if !AcquireHotkeyOwner("ClickSeq2", KeyClick2)
+        return
+    if !IsHookDown(KeyClick2) {
+        ReleaseHotkeyOwner("ClickSeq2")
+        return
+    }
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn2
     btnDown := "{" button " down}"
@@ -892,23 +1053,32 @@ HandleClick2(*) {
         Send "{" eachButton " up}"
         released := true
     }
-    if released
-        WaitMs(Click2_GapMs)
+    if released {
+        WaitMsCancel(Click2_GapMs, KeyClick2)
+    }
     try {
-        while ShouldKeepRunning("ClickSeq2", KeyClick2, token) {
+        while ShouldKeepRunning("ClickSeq2", KeyClick2) {
+            if !IsScriptEnabledForContext() {
+                LogEvent("RUN", "ClickSeq2", "stop", "reason=context")
+                break
+            }
             Send btnDown
-            if !WaitMsCancel(Click2_HoldMs, KeyClick2) {
+            holdStart := QpcNow()
+            holdOk := WaitMsCancel(Click2_HoldMs, KeyClick2)
+            if !holdOk {
                 break
             }
             Send btnUp
-            if !WaitMsCancel(Click2_GapMs, KeyClick2)
+            gapStart := QpcNow()
+            gapOk := WaitMsCancel(Click2_GapMs, KeyClick2)
+            if !gapOk
                 break
         }
     } finally {
         Send btnUp  ; 確保滑鼠按鍵鬆開
-        SetKeyStateFlag(KeyClick2, false)
-        if (HotkeyToken.Has("ClickSeq2"))
-            HotkeyToken["ClickSeq2"] := ""
+        HotkeyStateMap["ClickSeq2"] := false
+        SetHookStateFlag(KeyClick2, false)
+        ReleaseHotkeyOwner("ClickSeq2")
     }
 }
 
@@ -917,8 +1087,14 @@ HandleClick3(*) {
     allowed := IsScriptEnabledForContext()
     if !allowed
         return
-    SetKeyStateFlag(KeyClick3, true)
-    token := StartHotkeyToken("ClickSeq3")
+    HotkeyStateMap["ClickSeq3"] := true
+    SetHookStateFlag(KeyClick3, true)
+    if !AcquireHotkeyOwner("ClickSeq3", KeyClick3)
+        return
+    if !IsHookDown(KeyClick3) {
+        ReleaseHotkeyOwner("ClickSeq3")
+        return
+    }
     ; 若左右鍵任一已按住，先放開並等待一次休息間隔，避免卡住
     button := ClickBtn3
     btnDown := "{" button " down}"
@@ -928,23 +1104,32 @@ HandleClick3(*) {
         Send "{" eachButton " up}"
         released := true
     }
-    if released
-        WaitMs(Click3_GapMs)
+    if released {
+        WaitMsCancel(Click3_GapMs, KeyClick3)
+    }
     try {
-        while ShouldKeepRunning("ClickSeq3", KeyClick3, token) {
+        while ShouldKeepRunning("ClickSeq3", KeyClick3) {
+            if !IsScriptEnabledForContext() {
+                LogEvent("RUN", "ClickSeq3", "stop", "reason=context")
+                break
+            }
             Send btnDown
-            if !WaitMsCancel(Click3_HoldMs, KeyClick3) {
+            holdStart := QpcNow()
+            holdOk := WaitMsCancel(Click3_HoldMs, KeyClick3)
+            if !holdOk {
                 break
             }
             Send btnUp
-            if !WaitMsCancel(Click3_GapMs, KeyClick3)
+            gapStart := QpcNow()
+            gapOk := WaitMsCancel(Click3_GapMs, KeyClick3)
+            if !gapOk
                 break
         }
     } finally {
         Send btnUp  ; 確保滑鼠按鍵鬆開
-        SetKeyStateFlag(KeyClick3, false)
-        if (HotkeyToken.Has("ClickSeq3"))
-            HotkeyToken["ClickSeq3"] := ""
+        HotkeyStateMap["ClickSeq3"] := false
+        SetHookStateFlag(KeyClick3, false)
+        ReleaseHotkeyOwner("ClickSeq3")
     }
 }
 
@@ -952,7 +1137,7 @@ HandleClick3(*) {
 ; 勾選事件與延遲顯示
 ; ============================================================
 SetFeatureEnabled(id, state) {
-    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
+    global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled, IsPanicEnabled
     global TxtStatus
 
     enabled := (state != 0)
@@ -963,6 +1148,7 @@ SetFeatureEnabled(id, state) {
         case "ClickSeq1": IsClick1Enabled := enabled
         case "ClickSeq2": IsClick2Enabled := enabled
         case "ClickSeq3": IsClick3Enabled := enabled
+        case "Panic":     IsPanicEnabled := enabled
     }
 
     SaveKeySettings()
@@ -1083,7 +1269,7 @@ WM_XBUTTONDOWN(wParam, *) {
 FinishBinding(newKey) {
     global IsBinding, BindingActionId, BindingDisplayCtrl, BindingInputHook
     global TxtStatus
-    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3, KeyPanic
 
     if !IsBinding
         return
@@ -1103,6 +1289,7 @@ FinishBinding(newKey) {
         case "ClickSeq1": KeyClick1 := newKey
         case "ClickSeq2": KeyClick2 := newKey
         case "ClickSeq3": KeyClick3 := newKey
+        case "Panic":     KeyPanic := newKey
     }
 
     BindingDisplayCtrl.Value := newKey
@@ -1150,10 +1337,9 @@ ImportSettings(*) {
 ; ============================================================
 BuildGui() {
     global MainGui, TxtStatus, ChkAutoStart
-    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3
-    global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3
+    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3, EditKeyPanic
+    global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3, ChkPanic
     global EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
-    global LblClick1Hold, LblClick1Gap, LblClick2Hold, LblClick2Gap, LblClick3Hold, LblClick3Gap
     global DelayCtrlMap, TxtClick1Info, TxtClick2Info, TxtClick3Info, TxtClick1Warn, TxtClick2Warn, TxtClick3Warn
     global Click1WarnPosX, Click1WarnPosY, Click2WarnPosX, Click2WarnPosY, Click3WarnPosX, Click3WarnPosY, WarnOffsetXPx
     global TxtNikkeStatus
@@ -1221,6 +1407,16 @@ BuildGui() {
     FeatureCtrlMap["ClickSeq3"] := [lblClick3, EditKeyClick3, btnBindL3, BtnClick3Side]
 
     MainGui.Add("Text", "xs yp+40 w380 h2 0x10", "")
+
+    lblPanic := MainGui.Add("Text", "xs yp+20", "逃脫鍵：")
+    EditKeyPanic := MainGui.Add("Edit", "x+23 w90 ReadOnly yp-5", KeyPanic)
+    btnBindPanic  := MainGui.Add("Button", "x+5 w80 yp-1", "變更")
+    btnBindPanic.OnEvent("Click", (*) => StartCaptureBinding("Panic", EditKeyPanic))
+    ChkPanic := MainGui.Add("CheckBox", (IsPanicEnabled ? "Checked " : "") "x+5 yp+5", "啟用")
+    ChkPanic.OnEvent("Click", (*) => SetFeatureEnabled("Panic", ChkPanic.Value))
+    FeatureCtrlMap["Panic"] := [lblPanic, EditKeyPanic, btnBindPanic]
+
+    MainGui.Add("Text", "xs yp+30 w380 h2 0x10", "")
     MainGui.Add("Text", "xs yp+20", "延遲設定：")
 
     LblClick1Hold := MainGui.Add("Text", , "連點1：按壓時間 (ms)")
@@ -1292,13 +1488,13 @@ BuildGui() {
 }
 
 RefreshUI() {
-    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3
+    global KeySpamD, KeySpamS, KeySpamA, KeyClick1, KeyClick2, KeyClick3, KeyPanic
     global IsSpamDEnabled, IsSpamSEnabled, IsSpamAEnabled, IsClick1Enabled, IsClick2Enabled, IsClick3Enabled
     global Click1_HoldMs, Click1_GapMs, Click2_HoldMs, Click2_GapMs, Click3_HoldMs, Click3_GapMs
     global AutoStartEnabled
     global BtnClick1Side, BtnClick2Side, BtnClick3Side
     global ClickBtn1, ClickBtn2, ClickBtn3
-    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3
+    global EditKeySpamD, EditKeySpamS, EditKeySpamA, EditKeyClick1, EditKeyClick2, EditKeyClick3, EditKeyPanic
     global ChkSpamD, ChkSpamS, ChkSpamA, ChkClick1, ChkClick2, ChkClick3
     global EditClick1Hold, EditClick1Gap, EditClick2Hold, EditClick2Gap, EditClick3Hold, EditClick3Gap
     global ChkAutoStart, TxtStatus, EnableCursorLock, ChkGlobalHotkeys, EnableGlobalHotkeys
@@ -1309,6 +1505,8 @@ RefreshUI() {
     EditKeyClick1.Value  := KeyClick1
     EditKeyClick2.Value  := KeyClick2
     EditKeyClick3.Value  := KeyClick3
+    if IsSet(EditKeyPanic)
+        EditKeyPanic.Value := KeyPanic
 
     ChkSpamD.Value   := IsSpamDEnabled      ? 1 : 0
     ChkSpamS.Value   := IsSpamSEnabled      ? 1 : 0
@@ -1316,6 +1514,8 @@ RefreshUI() {
     ChkClick1.Value  := IsClick1Enabled ? 1 : 0
     ChkClick2.Value  := IsClick2Enabled ? 1 : 0
     ChkClick3.Value  := IsClick3Enabled ? 1 : 0
+    if IsSet(ChkPanic)
+        ChkPanic.Value := IsPanicEnabled ? 1 : 0
     SetClickButtonText(1, ClickBtn1)
     SetClickButtonText(2, ClickBtn2)
     SetClickButtonText(3, ClickBtn3)
