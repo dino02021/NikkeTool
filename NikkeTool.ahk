@@ -92,7 +92,7 @@ global BindingActionId := ""
 global BindingDisplayCtrl := ""
 global BindingInputHook
 
-global AppVersion := "v3.0"
+global AppVersion := "v3.01"
 
 ; ============================================================
 ; 初始化
@@ -156,7 +156,7 @@ CursorLockTick(*) {
 LockCursorToNikke() {
     global IsCursorLocked
     try {
-        hwnd := WinExist("ahk_exe nikke.exe")
+        hwnd := WinActive("ahk_exe nikke.exe")
         if !hwnd {
             UnlockCursor()
             return
